@@ -73,10 +73,10 @@
                 let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
 
                 // Definir Sexo
-                let sexo = machos.includes(cat) ? 'Macho' : (femeas.includes(cat) ? 'Fêmea' : 'Misto/Outros'); 
+                let sexo = machos.includes(cat) ? 'Macho' : 'Fêmea'; 
 
                 if (localAdd && localAdd !== 'Externo') {
-                    if(!fazendas[localAdd]) fazendas[localAdd] = { Macho: 0, Fêmea: 0, 'Misto/Outros': 0 };
+                    if(!fazendas[localAdd]) fazendas[localAdd] = { Macho: 0, Fêmea: 0 };
                     fazendas[localAdd][sexo] += qtd;
                     saldoGeral += qtd;
                     
@@ -87,7 +87,7 @@
                 }
 
                 if (localSub && localSub !== 'Externo') {
-                    if(!fazendas[localSub]) fazendas[localSub] = { Macho: 0, Fêmea: 0, 'Misto/Outros': 0 };
+                    if(!fazendas[localSub]) fazendas[localSub] = { Macho: 0, Fêmea: 0 };
                     fazendas[localSub][sexo] -= qtd;
                     saldoGeral -= qtd;
 
@@ -112,8 +112,7 @@
             for (let faz in fazendas) {
                 let m = fazendas[faz].Macho;
                 let f = fazendas[faz].Fêmea;
-                let o = fazendas[faz]['Misto/Outros'];
-                let totalLocal = m + f + o;
+                let totalLocal = m + f;
                 
                 if (totalLocal <= 0) continue;
 
@@ -122,7 +121,6 @@
                         <td class="p-2 font-bold text-slate-700">${faz}</td>
                         <td class="p-2 text-center text-blue-600">${m}</td>
                         <td class="p-2 text-center text-pink-600">${f}</td>
-                        <td class="p-2 text-center text-slate-500">${o}</td>
                         <td class="p-2 text-center font-black">${totalLocal}</td>
                     </tr>
                 `;
@@ -143,12 +141,15 @@
             let arvore = {};
             
             lancamentos.forEach(lan => {
-                // Ignorar acertos e transferências
+                // Ignorar acertos, transferências e o Custo de Aquisição de Bovinos (conforme solicitado)
                 if (lan.categoria === 'Transferência entre Sócios' || lan.tipoCusto === 'Financeiro e Sócios') return;
-
-                let tipo = lan.tipoCusto || 'Sem Tipo';
+                
                 let cat = lan.categoria || 'Sem Categoria';
                 let sub = lan.subcategoria || 'Sem Subcategoria';
+                
+                if (cat.includes('Aquisição Bovinos') || sub.includes('Aquisição Bovinos')) return;
+
+                let tipo = lan.tipoCusto || 'Sem Tipo';
                 let val = parseFloat(lan.valor) || 0;
 
                 if (!arvore[tipo]) arvore[tipo] = { total: 0, categorias: {} };
@@ -186,6 +187,10 @@
 
             lancamentos.forEach(lan => {
                 if (lan.tipoCusto === 'Custos Fixos' || lan.tipoCusto === 'Custos Variáveis') {
+                    // Ignora Aquisição de Bovinos no custo cabeça mês
+                    if (lan.categoria && lan.categoria.includes('Aquisição Bovinos')) return;
+                    if (lan.subcategoria && lan.subcategoria.includes('Aquisição Bovinos')) return;
+
                     if (lan.data) {
                         let mesAno = lan.data.substring(0, 7); 
                         if (!mesesMap[mesAno]) mesesMap[mesAno] = { despesas: 0, cabecas: 0 };
@@ -342,23 +347,22 @@
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
-                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Estoque por Fazenda e Sexo</h2>
+                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Estoque</h2>
                 <table class="w-full text-xs text-left">
                     <thead>
                         <tr class="bg-slate-100 text-slate-600 uppercase">
                             <th class="p-2">Fazenda / Local</th>
                             <th class="p-2 text-center text-blue-800">Machos</th>
                             <th class="p-2 text-center text-pink-800">Fêmeas</th>
-                            <th class="p-2 text-center text-slate-600">Misto</th>
                             <th class="p-2 text-center font-black">Total</th>
                         </tr>
                     </thead>
                     <tbody id="tbody-estoque">
-                        <tr><td colspan="5" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
+                        <tr><td colspan="4" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
                     </tbody>
                 </table>
 
-                <h2 class="text-sm font-bold text-emerald-800 uppercase mt-6 mb-3 border-b pb-1 border-emerald-200 no-print">Simulador de Venda (Preços Atuais)</h2>
+                <h2 class="text-sm font-bold text-emerald-800 uppercase mt-6 mb-3 border-b pb-1 border-emerald-200 no-print">Simulador de Venda</h2>
                 <div id="div-previsao-inputs" class="space-y-1 no-print">
                     <p class="text-xs text-slate-400">Aguardando dados do estoque...</p>
                 </div>
