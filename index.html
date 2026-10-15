@@ -40,12 +40,12 @@
         window.abrirAba = function(abaId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.querySelectorAll('.tab-btn').forEach(el => {
-                el.classList.remove('border-slate-800', 'text-slate-800', 'font-black');
-                el.classList.add('border-transparent', 'text-slate-500', 'font-bold');
+                el.classList.remove('border-slate-800', 'text-slate-800');
+                el.classList.add('border-transparent', 'text-slate-500');
             });
             document.getElementById(abaId).classList.remove('hidden');
-            document.getElementById('btn-' + abaId).classList.remove('border-transparent', 'text-slate-500', 'font-bold');
-            document.getElementById('btn-' + abaId).classList.add('border-slate-800', 'text-slate-800', 'font-black');
+            document.getElementById('btn-' + abaId).classList.remove('border-transparent', 'text-slate-500');
+            document.getElementById('btn-' + abaId).classList.add('border-slate-800', 'text-slate-800');
         };
 
         // ESCUTADORES EM TEMPO REAL
@@ -141,15 +141,15 @@
                 
                 htmlRows.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs ${item.pendente ? 'bg-amber-50/60' : ''}">
-                        <td class="p-2 text-center text-slate-500 font-mono">[${index+1}]</td>
-                        <td class="p-2 text-center">${item.data.split('-').reverse().join('/')}</td>
-                        <td class="p-2 font-medium">
+                        <td class="p-3 text-center text-slate-500 font-mono">[${index+1}]</td>
+                        <td class="p-3 text-center">${item.data.split('-').reverse().join('/')}</td>
+                        <td class="p-3 font-medium">
                             ${item.pendente ? '<span class="bg-amber-200 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded mr-1">PENDENTE</span>' : ''}
                             ${item.descricao}<br><span class="text-[9px] text-slate-500">${classif}</span>
                         </td>
-                        <td class="p-2 text-right font-mono">${aporteRonei ? 'R$ '+aporteRonei.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
-                        <td class="p-2 text-right font-mono">${aporteDeivid ? 'R$ '+aporteDeivid.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
-                        <td class="p-2 text-right font-bold text-slate-700 font-mono">R$ ${Math.abs(saldoAcumulado).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
+                        <td class="p-3 text-right font-mono">${aporteRonei ? 'R$ '+aporteRonei.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
+                        <td class="p-3 text-right font-mono">${aporteDeivid ? 'R$ '+aporteDeivid.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
+                        <td class="p-3 text-right font-bold text-slate-700 font-mono">R$ ${Math.abs(saldoAcumulado).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
                     </tr>
                 `);
             });
@@ -177,7 +177,9 @@
             let estoque_cabecas = 0;
             let valor_estoque = 0;
 
-            // Construir Estoque Atual e Cálculo do Custo Médio Contínuo
+            let historicoOperacoes = [];
+
+            // Primeira passada para construir dados
             window.movimentacoes.forEach(mov => {
                 const qtd = parseInt(mov.quantidade) || 0; 
                 const cat = mov.categoria || 'Outros';
@@ -203,14 +205,16 @@
                     saldoGeral -= qtd;
                 }
 
-                // Cálculo Financeiro e Formatação
+                // Cálculo Financeiro Progressivo
+                let exibicaoValor = "-";
+                
                 if (tipo === 'Compra') {
                     estoque_cabecas += qtd;
                     valor_estoque += valorFin;
-                    mov._valorExibicao = `R$ ${valorFin.toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
+                    exibicaoValor = `R$ ${valorFin.toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
                 } else if (tipo === 'Nascimento') {
                     estoque_cabecas += qtd;
-                    mov._valorExibicao = `-`;
+                    exibicaoValor = `-`;
                 } else if (['Venda', 'Abate', 'Morte'].includes(tipo)) {
                     let custo_medio = estoque_cabecas > 0 ? valor_estoque / estoque_cabecas : 0;
                     let valor_deduzido = custo_medio * qtd;
@@ -222,13 +226,19 @@
                     if (estoque_cabecas < 0) estoque_cabecas = 0;
 
                     if (tipo === 'Morte') {
-                        mov._valorExibicao = `<span class="text-red-600 font-bold">- R$ ${valor_deduzido.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span><br><span class="text-[9px] text-slate-500 font-sans">Custo Médio: R$ ${custo_medio.toLocaleString('pt-BR',{minimumFractionDigits:2})}/cab</span>`;
+                        exibicaoValor = `<span class="text-red-600 font-bold">- R$ ${valor_deduzido.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span><br><span class="text-[9px] text-slate-500 font-sans tracking-wide">Custo Médio: R$ ${custo_medio.toLocaleString('pt-BR',{minimumFractionDigits:2})}/cab</span>`;
                     } else { // Venda ou Abate
-                        mov._valorExibicao = `R$ ${valorFin.toLocaleString('pt-BR',{minimumFractionDigits:2})}<br><span class="text-[9px] text-slate-500 font-sans">Baixa do Estoque: -R$ ${valor_deduzido.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>`;
+                        exibicaoValor = `R$ ${valorFin.toLocaleString('pt-BR',{minimumFractionDigits:2})}<br><span class="text-[9px] text-slate-500 font-sans tracking-wide">Baixa do Estoque: -R$ ${valor_deduzido.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>`;
                     }
-                } else {
-                    mov._valorExibicao = `-`; // Transferência
                 }
+
+                historicoOperacoes.push({
+                    dataStr: mov.data,
+                    tipo: tipo,
+                    categoria: cat,
+                    qtd: qtd,
+                    valorExibicao: exibicaoValor
+                });
             });
 
             window.custoEstoqueAtual = Math.max(0, valor_estoque);
@@ -240,19 +250,19 @@
                 if (window.fazendasEstoque[faz].Total <= 0) continue;
                 tbodyAtivos.innerHTML += `
                     <tr class="border-b border-slate-200">
-                        <td class="p-2 font-bold text-slate-700">${faz}</td>
-                        <td class="p-2 text-center text-blue-700">${window.fazendasEstoque[faz].Macho}</td>
-                        <td class="p-2 text-center text-pink-700">${window.fazendasEstoque[faz].Fêmea}</td>
-                        <td class="p-2 text-center font-black">${window.fazendasEstoque[faz].Total}</td>
+                        <td class="p-3 font-bold text-slate-700">${faz}</td>
+                        <td class="p-3 text-center text-blue-700">${window.fazendasEstoque[faz].Macho}</td>
+                        <td class="p-3 text-center text-pink-700">${window.fazendasEstoque[faz].Fêmea}</td>
+                        <td class="p-3 text-center font-black">${window.fazendasEstoque[faz].Total}</td>
                     </tr>
                 `;
             }
 
-            // Tabela de Histórico
+            // Tabela de Histórico - Renderizando invertido
             let tbodyHist = document.getElementById('estoque-tbody-hist');
             let histHtml = [];
             
-            window.movimentacoes.forEach((item) => {
+            historicoOperacoes.forEach((item) => {
                 let corOp = "text-slate-700";
                 if(item.tipo === 'Compra') corOp = "text-blue-700 font-bold";
                 if(item.tipo === 'Venda') corOp = "text-emerald-700 font-bold";
@@ -260,11 +270,11 @@
 
                 histHtml.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs">
-                        <td class="p-2 text-center">${item.data ? item.data.split('-').reverse().join('/') : ''}</td>
-                        <td class="p-2 ${corOp}">${item.tipo}</td>
-                        <td class="p-2">${item.categoria}</td>
-                        <td class="p-2 text-center font-bold">${item.quantidade}</td>
-                        <td class="p-2 text-right font-mono">${item._valorExibicao}</td>
+                        <td class="p-3 text-center">${item.dataStr ? item.dataStr.split('-').reverse().join('/') : ''}</td>
+                        <td class="p-3 ${corOp}">${item.tipo}</td>
+                        <td class="p-3">${item.categoria}</td>
+                        <td class="p-3 text-center font-bold">${item.qtd}</td>
+                        <td class="p-3 text-right font-mono">${item.valorExibicao}</td>
                     </tr>
                 `);
             });
@@ -280,7 +290,6 @@
         // ABA: PROJEÇÃO DE VENDAS
         // -----------------------------------------
         function atualizarProjecao() {
-            // O custoEstoqueAtual já foi calculado na atualizarEstoque()
             document.getElementById('proj-custo-estoque').innerText = `R$ ${window.custoEstoqueAtual.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
 
             let divPrevisao = document.getElementById('div-projecao-inputs');
@@ -364,7 +373,6 @@
                 let despesaMes = mesesMap[mes] ? mesesMap[mes].despesas : 0;
                 let custoCabeca = saldoCorrente > 0 ? (despesaMes / saldoCorrente) : 0;
 
-                // Bloqueia exibição de meses sem despesas (Limpeza do primeiro mês)
                 if (despesaMes === 0) return;
 
                 htmlRows.unshift(`
@@ -387,31 +395,33 @@
         window.onload = () => { abrirAba('tab-acerto'); };
     </script>
 </head>
-<body class="bg-slate-100 min-h-screen font-sans">
+<body class="bg-slate-50 min-h-screen font-sans">
 
-    <!-- MENU SUPERIOR (ABAS) -->
+    <!-- MENU SUPERIOR -->
     <div class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
-        <div class="max-w-6xl mx-auto px-4 flex gap-6 pt-4 overflow-x-auto">
-            <button id="btn-tab-acerto" onclick="abrirAba('tab-acerto')" class="tab-btn pb-2 border-b-4 border-slate-800 text-slate-800 font-black uppercase text-sm whitespace-nowrap transition-all">Acerto DR</button>
-            <button id="btn-tab-estoque" onclick="abrirAba('tab-estoque')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Estoque DR</button>
-            <button id="btn-tab-projecao" onclick="abrirAba('tab-projecao')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Projeção</button>
-            <button id="btn-tab-custo" onclick="abrirAba('tab-custo')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Custo Mês</button>
+        <div class="max-w-5xl mx-auto px-4 pt-5 pb-3">
+            <h1 class="text-3xl font-black text-slate-800 uppercase tracking-tighter mb-4">Gestão DR</h1>
+            <div class="flex gap-8 overflow-x-auto">
+                <button id="btn-tab-acerto" onclick="abrirAba('tab-acerto')" class="tab-btn pb-2 border-b-4 border-slate-800 text-slate-800 font-bold uppercase text-sm whitespace-nowrap transition-all">Acerto</button>
+                <button id="btn-tab-estoque" onclick="abrirAba('tab-estoque')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Estoque</button>
+                <button id="btn-tab-projecao" onclick="abrirAba('tab-projecao')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Projeção</button>
+                <button id="btn-tab-custo" onclick="abrirAba('tab-custo')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Custo Mês</button>
+            </div>
         </div>
     </div>
 
-    <div class="max-w-6xl mx-auto p-4 md:p-6">
+    <div class="max-w-5xl mx-auto p-4 md:p-6 mt-2">
         
         <!-- ========================================== -->
         <!-- ABA 1: ACERTO DR -->
         <!-- ========================================== -->
-        <div id="tab-acerto" class="tab-content space-y-4">
-            
-            <div class="p-4 bg-white rounded-xl shadow-sm border border-slate-200">
-                <div class="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
-                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Filtros de Consulta Financeira</span>
-                    <button onclick="limparFiltros()" class="text-[10px] text-emerald-700 font-bold uppercase hover:underline">Limpar Filtros</button>
+        <div id="tab-acerto" class="tab-content space-y-5">
+            <div class="p-5 bg-white rounded-xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-4 border-b border-slate-100 pb-2">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wider">Filtros de Consulta Financeira</span>
+                    <button onclick="limparFiltros()" class="text-[10px] text-emerald-700 font-bold uppercase tracking-wider hover:underline">Limpar Filtros</button>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-4 text-xs">
                     <div>
                         <label class="block text-[10px] font-bold text-slate-500 uppercase">Data Inicial</label>
                         <input type="date" id="filtro-data-ini" onchange="atualizarAcerto()" class="w-full p-2 border rounded border-slate-300">
@@ -443,16 +453,16 @@
                 </div>
             </div>
 
-            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
                 <table class="w-full text-xs text-left">
                     <thead>
-                        <tr class="bg-emerald-800 text-white uppercase text-center font-bold">
-                            <th class="p-2 w-[5%]">Nº</th>
-                            <th class="p-2 w-[10%]">Data</th>
-                            <th class="p-2 text-left w-[40%]">Descrição / Classificação</th>
-                            <th class="p-2 text-right">Aporte Ronei</th>
-                            <th class="p-2 text-right">Aporte Deivid</th>
-                            <th class="p-2 text-right">Saldo Acumulado</th>
+                        <tr class="bg-slate-800 text-white uppercase text-center font-bold">
+                            <th class="p-3 w-[5%]">Nº</th>
+                            <th class="p-3 w-[10%]">Data</th>
+                            <th class="p-3 text-left w-[40%]">Descrição / Classificação</th>
+                            <th class="p-3 text-right">Aporte Ronei</th>
+                            <th class="p-3 text-right">Aporte Deivid</th>
+                            <th class="p-3 text-right">Saldo Acumulado</th>
                         </tr>
                     </thead>
                     <tbody id="acerto-tbody">
@@ -465,17 +475,16 @@
         <!-- ========================================== -->
         <!-- ABA 2: ESTOQUE DR -->
         <!-- ========================================== -->
-        <div id="tab-estoque" class="tab-content hidden space-y-6">
-            
+        <div id="tab-estoque" class="tab-content hidden space-y-5">
             <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Ativos no Estoque (Saldo Atual)</h2>
+                <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">Ativos no Estoque (Saldo Atual)</h2>
                 <table class="w-full text-xs text-left">
                     <thead>
-                        <tr class="bg-slate-100 text-slate-600 uppercase border-b border-slate-300">
-                            <th class="p-2 font-bold">Fazenda / Local</th>
-                            <th class="p-2 text-center font-bold">Macho</th>
-                            <th class="p-2 text-center font-bold">Fêmea</th>
-                            <th class="p-2 text-center font-black">Total de Cabeças</th>
+                        <tr class="bg-slate-800 text-white uppercase">
+                            <th class="p-3 font-bold">Fazenda / Local</th>
+                            <th class="p-3 text-center font-bold">Machos</th>
+                            <th class="p-3 text-center font-bold">Fêmeas</th>
+                            <th class="p-3 text-center font-black">Total de Cabeças</th>
                         </tr>
                     </thead>
                     <tbody id="estoque-tbody-ativos"></tbody>
@@ -483,15 +492,15 @@
             </div>
 
             <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Histórico de Transações</h2>
+                <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-100 pb-2">Histórico de Transações</h2>
                 <table class="w-full text-xs text-left">
                     <thead>
                         <tr class="bg-[#1f3b8b] text-white uppercase text-center font-bold">
-                            <th class="p-2 w-[15%]">Data</th>
-                            <th class="p-2 w-[15%]">Operação</th>
-                            <th class="p-2 w-[25%]">Categoria</th>
-                            <th class="p-2 w-[15%]">Cabeças</th>
-                            <th class="p-2 text-right w-[30%]">Valor Financeiro / Deduzido</th>
+                            <th class="p-3 w-[15%]">Data</th>
+                            <th class="p-3 w-[15%]">Operação</th>
+                            <th class="p-3 w-[25%]">Categoria</th>
+                            <th class="p-3 w-[15%]">Cabeças</th>
+                            <th class="p-3 text-right w-[30%]">Valor Financeiro / Deduzido</th>
                         </tr>
                     </thead>
                     <tbody id="estoque-tbody-hist"></tbody>
@@ -502,8 +511,8 @@
         <!-- ========================================== -->
         <!-- ABA 3: PROJEÇÃO -->
         <!-- ========================================== -->
-        <div id="tab-projecao" class="tab-content hidden space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div id="tab-projecao" class="tab-content hidden space-y-5">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-center">
                     <p class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Custo Total de Aquisição</p>
                     <h2 class="text-2xl font-black text-slate-800 mt-2" id="proj-custo-estoque">R$ 0,00</h2>
@@ -519,7 +528,7 @@
             </div>
 
             <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 max-w-2xl mx-auto">
-                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Simulador de Preço Médio por Fazenda</h2>
+                <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-5 border-b border-slate-100 pb-2">Simulador de Preço Médio por Fazenda</h2>
                 <div id="div-projecao-inputs" class="space-y-3">
                     <p class="text-xs text-slate-400">Carregando ativos...</p>
                 </div>
@@ -531,7 +540,7 @@
         <!-- ========================================== -->
         <div id="tab-custo" class="tab-content hidden">
             <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 max-w-3xl mx-auto">
-                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Evolução do Custo Cabeça / Mês</h2>
+                <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-5 border-b border-slate-100 pb-2">Evolução do Custo Cabeça / Mês</h2>
                 <table class="w-full text-xs text-left">
                     <thead>
                         <tr class="bg-slate-800 text-white uppercase">
