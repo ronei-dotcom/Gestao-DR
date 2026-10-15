@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Unificado - Sociedade DR</title>
+    <title>Sistema Gerencial - Sociedade DR</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc, setDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyDgnDHu-dHCo5oZRo113M5jQ1kxwX9_1uE",
@@ -23,16 +23,12 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // Coleções
         const colFinanceiro = collection(db, "lancamentos_dr");
         const colGado = collection(db, "movimentacoes_gado_dr");
-        const colCcRef = collection(db, "centros_custo_dr");
         const configDocRef = doc(db, "configuracoes_dr", "saldo_inicial");
 
-        // Variáveis Globais
         window.lancamentos = [];
         window.movimentacoes = [];
-        window.centrosCusto = ["Geral", "Arrendamento", "Nutrição / Ração", "Mão de Obra", "Infraestrutura", "Frete", "Compra de Gado", "Outros"];
         window.saldoInicialObj = { valor: 0, credor: "Nenhum" };
         window.fazendasEstoque = {}; 
         window.custoEstoqueAtual = 0;
@@ -44,27 +40,46 @@
         window.abrirAba = function(abaId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.querySelectorAll('.tab-btn').forEach(el => {
-                el.classList.remove('bg-emerald-800', 'text-white');
-                el.classList.add('bg-slate-200', 'text-slate-600');
+                el.classList.remove('border-slate-800', 'text-slate-800', 'font-black');
+                el.classList.add('border-transparent', 'text-slate-500', 'font-bold');
             });
             document.getElementById(abaId).classList.remove('hidden');
-            document.getElementById('btn-' + abaId).classList.remove('bg-slate-200', 'text-slate-600');
-            document.getElementById('btn-' + abaId).classList.add('bg-emerald-800', 'text-white');
+            document.getElementById('btn-' + abaId).classList.remove('border-transparent', 'text-slate-500', 'font-bold');
+            document.getElementById('btn-' + abaId).classList.add('border-slate-800', 'text-slate-800', 'font-black');
         };
 
         // ESCUTADORES EM TEMPO REAL
         onSnapshot(query(colFinanceiro, orderBy("data", "asc")), (snap) => {
             window.lancamentos = [];
-            snap.forEach(doc => window.lancamentos.push({idDoc: doc.id, ...doc.data()}));
-            atualizarGestao();
+            let tipos = new Set();
+            let categorias = new Set();
+            snap.forEach(doc => {
+                let data = doc.data();
+                window.lancamentos.push({idDoc: doc.id, ...data});
+                if(data.tipoCusto) tipos.add(data.tipoCusto);
+                if(data.categoria) categorias.add(data.categoria);
+            });
+            
+            // Popula selects de filtro
+            const selTipo = document.getElementById('filtro-tipo');
+            if(selTipo && selTipo.options.length <= 1) {
+                tipos.forEach(t => selTipo.innerHTML += `<option value="${t}">${t}</option>`);
+            }
+            const selCat = document.getElementById('filtro-categoria');
+            if(selCat && selCat.options.length <= 1) {
+                categorias.forEach(c => selCat.innerHTML += `<option value="${c}">${c}</option>`);
+            }
+            
             atualizarAcerto();
+            atualizarCustoMes();
         });
 
         onSnapshot(query(colGado, orderBy("data", "asc")), (snap) => {
             window.movimentacoes = [];
             snap.forEach(doc => window.movimentacoes.push({idDoc: doc.id, ...doc.data()}));
-            atualizarGestao();
             atualizarEstoque();
+            atualizarProjecao();
+            atualizarCustoMes();
         });
 
         onSnapshot(configDocRef, (docSnap) => {
@@ -73,134 +88,40 @@
         });
 
         // -----------------------------------------
-        // LÓGICA: GESTÃO (PAINEL GERENCIAL)
+        // ABA: ACERTO DR (FILTROS E TABELA)
         // -----------------------------------------
-        function atualizarGestao() {
-            if (!window.lancamentos.length && !window.movimentacoes.length) return;
-
-            let saldoGeral = 0;
-            let custoEstoque = 0;
-            window.fazendasEstoque = {};
-
-            // 1. Processar Estoque Físico
-            window.movimentacoes.forEach(mov => {
-                const qtd = parseInt(mov.quantidade) || 0; 
-                const valor = parseFloat(mov.valorFinanceiro) || 0; 
-                const cat = mov.categoria || 'Outros';
-                const tipo = mov.tipo; 
-                
-                let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
-                let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
-                let sexo = machos.includes(cat) ? 'Macho' : 'Fêmea'; 
-
-                if (localAdd && localAdd !== 'Externo') {
-                    if(!window.fazendasEstoque[localAdd]) window.fazendasEstoque[localAdd] = { Macho: 0, Fêmea: 0, Total: 0 };
-                    window.fazendasEstoque[localAdd][sexo] += qtd;
-                    window.fazendasEstoque[localAdd].Total += qtd;
-                    saldoGeral += qtd;
-                    if(tipo === 'Compra') custoEstoque += valor;
-                }
-
-                if (localSub && localSub !== 'Externo') {
-                    if(!window.fazendasEstoque[localSub]) window.fazendasEstoque[localSub] = { Macho: 0, Fêmea: 0, Total: 0 };
-                    window.fazendasEstoque[localSub][sexo] -= qtd;
-                    window.fazendasEstoque[localSub].Total -= qtd;
-                    saldoGeral -= qtd;
-                    if(tipo === 'Venda' || tipo === 'Abate') {
-                        if (saldoGeral > 0) custoEstoque -= ((custoEstoque / (saldoGeral + qtd)) * qtd);
-                        else custoEstoque = 0;
-                    }
-                }
-            });
-
-            // Preencher Tabela de Estoque na Gestão
-            let tbodyEstoque = document.getElementById('gestao-tbody-estoque');
-            if(tbodyEstoque) {
-                tbodyEstoque.innerHTML = '';
-                for (let faz in window.fazendasEstoque) {
-                    if (window.fazendasEstoque[faz].Total <= 0) continue;
-                    tbodyEstoque.innerHTML += `
-                        <tr class="border-b border-slate-200">
-                            <td class="p-2.5 font-bold text-slate-700">${faz}</td>
-                            <td class="p-2.5 text-center text-blue-700">${window.fazendasEstoque[faz].Macho}</td>
-                            <td class="p-2.5 text-center text-pink-700">${window.fazendasEstoque[faz].Fêmea}</td>
-                            <td class="p-2.5 text-center font-black">${window.fazendasEstoque[faz].Total}</td>
-                        </tr>
-                    `;
-                }
-            }
-
-            document.getElementById('dash-cabecas').innerText = saldoGeral;
-            window.custoEstoqueAtual = Math.max(0, custoEstoque);
-            document.getElementById('dash-custo-estoque').innerText = `R$ ${window.custoEstoqueAtual.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
-
-            gerarInputsPrevisaoPorFazenda();
-            processarDespesasGestao();
-            processarCustoMensalGestao();
-        }
-
-        // SIMULADOR AGORA É POR FAZENDA (A PEDIDO DO USUÁRIO)
-        function gerarInputsPrevisaoPorFazenda() {
-            let divPrevisao = document.getElementById('div-previsao-inputs');
-            if(!divPrevisao) return;
-            divPrevisao.innerHTML = '';
-
-            for (let faz in window.fazendasEstoque) {
-                let totalFazenda = window.fazendasEstoque[faz].Total;
-                if (totalFazenda > 0) {
-                    // Remove espaços para criar um ID válido
-                    let inputId = `prev-${faz.replace(/[^a-zA-Z0-9]/g, '')}`;
-                    divPrevisao.innerHTML += `
-                        <div class="flex items-center justify-between mb-2 p-2.5 border border-slate-200 rounded bg-slate-50">
-                            <span class="text-xs font-bold text-slate-700">${faz} <span class="font-normal text-slate-500">(${totalFazenda} cab.)</span></span>
-                            <div class="flex items-center gap-2">
-                                <label class="text-[10px] text-slate-500 uppercase font-bold">Valor Médio (R$)</label>
-                                <input type="number" id="${inputId}" data-qtd="${totalFazenda}" value="2500" oninput="calcularPrevisaoGestao()" class="input-simulador w-24 p-1.5 border border-slate-300 rounded text-xs text-right font-bold text-slate-800 outline-none focus:border-slate-500">
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-            calcularPrevisaoGestao();
-        }
-
-        window.calcularPrevisaoGestao = function() {
-            let totalPrevisao = 0;
-            document.querySelectorAll('.input-simulador').forEach(input => {
-                let qtd = parseInt(input.getAttribute('data-qtd')) || 0;
-                let preco = parseFloat(input.value) || 0;
-                totalPrevisao += (qtd * preco);
-            });
-            
-            document.getElementById('dash-previsao').innerText = `R$ ${totalPrevisao.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-            let resultado = totalPrevisao - window.custoEstoqueAtual;
-            let dashResultado = document.getElementById('dash-resultado');
-            dashResultado.innerText = `R$ ${resultado.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
-            dashResultado.className = resultado >= 0 ? "text-2xl font-black text-indigo-700 mt-1" : "text-2xl font-black text-red-600 mt-1";
-        };
-
-        function processarDespesasGestao() {
-            // Lógica mantida da versão anterior (Árvore de custos ignorando transferências)
-            // ... (Simplificado aqui para focar na estrutura da UI) ...
-        }
-
-        function processarCustoMensalGestao() {
-            // Lógica de rateio de meses mantida
-            // ...
-        }
-
-        // -----------------------------------------
-        // LÓGICA: ACERTO FINANCEIRO
-        // -----------------------------------------
-        function atualizarAcerto() {
+        window.atualizarAcerto = function() {
             const corpoTabela = document.getElementById('acerto-tbody');
             if(!corpoTabela) return;
             corpoTabela.innerHTML = '';
-            
+
+            const fIni = document.getElementById('filtro-data-ini').value;
+            const fFim = document.getElementById('filtro-data-fim').value;
+            const fPag = document.getElementById('filtro-pagador').value;
+            const fTipo = document.getElementById('filtro-tipo').value;
+            const fCat = document.getElementById('filtro-categoria').value;
+            const fStat = document.getElementById('filtro-status').value;
+
+            let filtrados = window.lancamentos.filter(item => {
+                if (fIni && item.data < fIni) return false;
+                if (fFim && item.data > fFim) return false;
+                if (fPag && item.socio !== fPag) return false;
+                if (fTipo && item.tipoCusto !== fTipo) return false;
+                if (fCat && item.categoria !== fCat) return false;
+                if (fStat === 'pendentes' && !item.pendente) return false;
+                if (fStat === 'concluidos' && item.pendente) return false;
+                return true;
+            });
+
             let totalRonei = 0, totalDeivid = 0;
             let saldoAcumulado = window.saldoInicialObj.credor === 'Deivid' ? window.saldoInicialObj.valor : (window.saldoInicialObj.credor === 'Ronei' ? -window.saldoInicialObj.valor : 0);
 
-            window.lancamentos.forEach((item, index) => {
+            if (filtrados.length === 0) {
+                corpoTabela.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-slate-400">Nenhum lançamento encontrado.</td></tr>';
+                return;
+            }
+
+            filtrados.forEach((item, index) => {
                 let aporteRonei = 0, aporteDeivid = 0;
                 const isTransf = item.categoria === 'Transferência entre Sócios' || item.subcategoria === 'Transferência entre Sócios';
 
@@ -215,161 +136,385 @@
 
                 saldoAcumulado = (window.saldoInicialObj.credor === 'Deivid' ? window.saldoInicialObj.valor : (window.saldoInicialObj.credor === 'Ronei' ? -window.saldoInicialObj.valor : 0)) + ((totalDeivid - totalRonei) / 2.0);
 
+                let classif = item.tipoCusto && item.subcategoria ? `[${item.tipoCusto}] ${item.categoria} > ${item.subcategoria}` : `[Antigo] ${item.categoria || 'Outros'}`;
+                
                 corpoTabela.innerHTML += `
-                    <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs">
+                    <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs ${item.pendente ? 'bg-amber-50/60' : ''}">
+                        <td class="p-2 text-center text-slate-500 font-mono">[${index+1}]</td>
                         <td class="p-2 text-center">${item.data.split('-').reverse().join('/')}</td>
-                        <td class="p-2 font-medium">${item.descricao}<br><span class="text-[9px] text-slate-500">${item.categoria || 'Geral'}</span></td>
+                        <td class="p-2 font-medium">
+                            ${item.pendente ? '<span class="bg-amber-200 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded mr-1">PENDENTE</span>' : ''}
+                            ${item.descricao}<br><span class="text-[9px] text-slate-500">${classif}</span>
+                        </td>
                         <td class="p-2 text-right font-mono">${aporteRonei ? 'R$ '+aporteRonei.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
                         <td class="p-2 text-right font-mono">${aporteDeivid ? 'R$ '+aporteDeivid.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
                         <td class="p-2 text-right font-bold text-slate-700 font-mono">R$ ${Math.abs(saldoAcumulado).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
                     </tr>
                 `;
             });
-        }
+        };
+
+        window.limparFiltros = function() {
+            document.getElementById('filtro-data-ini').value = '';
+            document.getElementById('filtro-data-fim').value = '';
+            document.getElementById('filtro-pagador').value = '';
+            document.getElementById('filtro-tipo').value = '';
+            document.getElementById('filtro-categoria').value = '';
+            document.getElementById('filtro-status').value = '';
+            atualizarAcerto();
+        };
 
         // -----------------------------------------
-        // LÓGICA: ESTOQUE DR
+        // ABA: ESTOQUE DR (ATIVOS E HISTÓRICO)
         // -----------------------------------------
         function atualizarEstoque() {
-            const corpoTabela = document.getElementById('estoque-tbody');
-            if(!corpoTabela) return;
-            corpoTabela.innerHTML = '';
-            
+            let saldoGeral = 0;
+            window.fazendasEstoque = {};
+
+            // Construir Estoque Atual
+            window.movimentacoes.forEach(mov => {
+                const qtd = parseInt(mov.quantidade) || 0; 
+                const cat = mov.categoria || 'Outros';
+                const tipo = mov.tipo; 
+                
+                let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
+                let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
+                let sexo = machos.includes(cat) ? 'Macho' : 'Fêmea'; 
+
+                if (localAdd && localAdd !== 'Externo') {
+                    if(!window.fazendasEstoque[localAdd]) window.fazendasEstoque[localAdd] = { Macho: 0, Fêmea: 0, Total: 0 };
+                    window.fazendasEstoque[localAdd][sexo] += qtd;
+                    window.fazendasEstoque[localAdd].Total += qtd;
+                    saldoGeral += qtd;
+                }
+
+                if (localSub && localSub !== 'Externo') {
+                    if(!window.fazendasEstoque[localSub]) window.fazendasEstoque[localSub] = { Macho: 0, Fêmea: 0, Total: 0 };
+                    window.fazendasEstoque[localSub][sexo] -= qtd;
+                    window.fazendasEstoque[localSub].Total -= qtd;
+                    saldoGeral -= qtd;
+                }
+            });
+
+            // Tabela de Ativos
+            let tbodyAtivos = document.getElementById('estoque-tbody-ativos');
+            tbodyAtivos.innerHTML = '';
+            for (let faz in window.fazendasEstoque) {
+                if (window.fazendasEstoque[faz].Total <= 0) continue;
+                tbodyAtivos.innerHTML += `
+                    <tr class="border-b border-slate-200">
+                        <td class="p-2 font-bold text-slate-700">${faz}</td>
+                        <td class="p-2 text-center text-blue-700">${window.fazendasEstoque[faz].Macho}</td>
+                        <td class="p-2 text-center text-pink-700">${window.fazendasEstoque[faz].Fêmea}</td>
+                        <td class="p-2 text-center font-black">${window.fazendasEstoque[faz].Total}</td>
+                    </tr>
+                `;
+            }
+
+            // Tabela de Histórico
+            let tbodyHist = document.getElementById('estoque-tbody-hist');
+            tbodyHist.innerHTML = '';
             window.movimentacoes.forEach((item) => {
-                corpoTabela.innerHTML += `
+                let corOp = "text-slate-700";
+                if(item.tipo === 'Compra') corOp = "text-blue-700 font-bold";
+                if(item.tipo === 'Venda') corOp = "text-emerald-700 font-bold";
+                if(item.tipo === 'Morte') corOp = "text-red-600 font-bold";
+
+                tbodyHist.innerHTML += `
                     <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs">
                         <td class="p-2 text-center">${item.data ? item.data.split('-').reverse().join('/') : ''}</td>
-                        <td class="p-2 font-bold ${item.tipo === 'Compra' ? 'text-blue-600' : (item.tipo === 'Venda' ? 'text-emerald-600' : 'text-slate-600')}">${item.tipo}</td>
+                        <td class="p-2 ${corOp}">${item.tipo}</td>
                         <td class="p-2">${item.categoria}</td>
                         <td class="p-2 text-center font-bold">${item.quantidade}</td>
-                        <td class="p-2">${item.origem || '-'} ➔ ${item.destino || '-'}</td>
+                        <td class="p-2 font-medium">${item.origem || 'Externo'} ➔ ${item.destino || 'Externo'}</td>
                         <td class="p-2 text-right font-mono">${item.valorFinanceiro ? 'R$ ' + parseFloat(item.valorFinanceiro).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
                     </tr>
                 `;
             });
         }
 
-        window.onload = () => { abrirAba('tab-gestao'); };
+        // -----------------------------------------
+        // ABA: PROJEÇÃO DE VENDAS
+        // -----------------------------------------
+        function atualizarProjecao() {
+            let saldoGeral = 0;
+            let custoEstoque = 0;
+
+            window.movimentacoes.forEach(mov => {
+                const qtd = parseInt(mov.quantidade) || 0; 
+                const valor = parseFloat(mov.valorFinanceiro) || 0; 
+                const tipo = mov.tipo; 
+                
+                let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
+                let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
+
+                if (localAdd && localAdd !== 'Externo') {
+                    saldoGeral += qtd;
+                    if(tipo === 'Compra') custoEstoque += valor;
+                }
+                if (localSub && localSub !== 'Externo') {
+                    saldoGeral -= qtd;
+                    if(tipo === 'Venda' || tipo === 'Abate') {
+                        if (saldoGeral > 0) custoEstoque -= ((custoEstoque / (saldoGeral + qtd)) * qtd);
+                        else custoEstoque = 0;
+                    }
+                }
+            });
+
+            window.custoEstoqueAtual = Math.max(0, custoEstoque);
+            document.getElementById('proj-custo-estoque').innerText = `R$ ${window.custoEstoqueAtual.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
+
+            let divPrevisao = document.getElementById('div-projecao-inputs');
+            divPrevisao.innerHTML = '';
+            for (let faz in window.fazendasEstoque) {
+                let totalFazenda = window.fazendasEstoque[faz].Total;
+                if (totalFazenda > 0) {
+                    let inputId = `proj-${faz.replace(/[^a-zA-Z0-9]/g, '')}`;
+                    divPrevisao.innerHTML += `
+                        <div class="flex items-center justify-between mb-2 p-3 border border-slate-200 rounded bg-slate-50">
+                            <span class="text-sm font-bold text-slate-700">${faz} <span class="font-normal text-slate-500">(${totalFazenda} cabeças)</span></span>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] text-slate-500 uppercase font-bold">Valor Médio (R$)</label>
+                                <input type="number" id="${inputId}" data-qtd="${totalFazenda}" value="2500" oninput="calcularProjecaoMatematica()" class="input-projecao w-24 p-2 border border-slate-300 rounded text-sm text-right font-bold text-slate-800 outline-none">
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            calcularProjecaoMatematica();
+        }
+
+        window.calcularProjecaoMatematica = function() {
+            let totalPrevisao = 0;
+            document.querySelectorAll('.input-projecao').forEach(input => {
+                let qtd = parseInt(input.getAttribute('data-qtd')) || 0;
+                let preco = parseFloat(input.value) || 0;
+                totalPrevisao += (qtd * preco);
+            });
+            
+            document.getElementById('proj-bruta').innerText = `R$ ${totalPrevisao.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+            let resultado = totalPrevisao - window.custoEstoqueAtual;
+            let dashResultado = document.getElementById('proj-resultado');
+            dashResultado.innerText = `R$ ${resultado.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+            dashResultado.className = resultado >= 0 ? "text-2xl font-black text-indigo-700 mt-2" : "text-2xl font-black text-red-600 mt-2";
+        };
+
+        // -----------------------------------------
+        // ABA: CUSTO CABEÇA / MÊS
+        // -----------------------------------------
+        function atualizarCustoMes() {
+            let mesesMap = {}; 
+            window.lancamentos.forEach(lan => {
+                if (lan.tipoCusto === 'Custos Fixos' || lan.tipoCusto === 'Custos Variáveis') {
+                    if (lan.categoria && lan.categoria.includes('Aquisição Bovinos')) return;
+                    if (lan.subcategoria && lan.subcategoria.includes('Aquisição Bovinos')) return;
+
+                    if (lan.data) {
+                        let mesAno = lan.data.substring(0, 7); 
+                        if (!mesesMap[mesAno]) mesesMap[mesAno] = { despesas: 0, cabecas: 0 };
+                        mesesMap[mesAno].despesas += parseFloat(lan.valor) || 0;
+                    }
+                }
+            });
+
+            let movimentosAgrupadosPorMes = {};
+            window.movimentacoes.forEach(mov => {
+                if(mov.data) {
+                    let mesAno = mov.data.substring(0, 7);
+                    if(!movimentosAgrupadosPorMes[mesAno]) movimentosAgrupadosPorMes[mesAno] = 0;
+                    
+                    let qtd = parseInt(mov.quantidade) || 0;
+                    let tipo = mov.tipo;
+
+                    if (tipo === 'Compra' || tipo === 'Nascimento') movimentosAgrupadosPorMes[mesAno] += qtd;
+                    if (tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte') movimentosAgrupadosPorMes[mesAno] -= qtd;
+                }
+            });
+
+            let todosMeses = Array.from(new Set([...Object.keys(mesesMap), ...Object.keys(movimentosAgrupadosPorMes)])).sort();
+            
+            let tbodyMensal = document.getElementById('tbody-custo-mensal');
+            if(!tbodyMensal) return;
+            tbodyMensal.innerHTML = '';
+            
+            let saldoCorrente = 0;
+            todosMeses.forEach(mes => {
+                if(movimentosAgrupadosPorMes[mes]) saldoCorrente += movimentosAgrupadosPorMes[mes];
+                let despesaMes = mesesMap[mes] ? mesesMap[mes].despesas : 0;
+                let custoCabeca = saldoCorrente > 0 ? (despesaMes / saldoCorrente) : 0;
+
+                tbodyMensal.innerHTML += `
+                    <tr class="border-b border-slate-200 hover:bg-slate-50">
+                        <td class="p-3 text-center font-bold text-slate-700">${mes.split('-')[1]}/${mes.split('-')[0]}</td>
+                        <td class="p-3 text-center text-slate-700">${saldoCorrente}</td>
+                        <td class="p-3 text-right text-red-600 font-medium">R$ ${despesaMes.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                        <td class="p-3 text-right font-black text-slate-800">R$ ${custoCabeca.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        window.onload = () => { abrirAba('tab-acerto'); };
     </script>
 </head>
 <body class="bg-slate-100 min-h-screen font-sans">
 
-    <!-- NAVEGAÇÃO DE ABAS -->
+    <!-- MENU SUPERIOR (ABAS) -->
     <div class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
-        <div class="max-w-6xl mx-auto px-4 flex gap-2 pt-3">
-            <button id="btn-tab-gestao" onclick="abrirAba('tab-gestao')" class="tab-btn px-6 py-3 text-sm font-bold uppercase rounded-t-lg transition-colors">Gestão / Painel</button>
-            <button id="btn-tab-acerto" onclick="abrirAba('tab-acerto')" class="tab-btn px-6 py-3 text-sm font-bold uppercase rounded-t-lg transition-colors">Acerto Financeiro</button>
-            <button id="btn-tab-estoque" onclick="abrirAba('tab-estoque')" class="tab-btn px-6 py-3 text-sm font-bold uppercase rounded-t-lg transition-colors">Estoque de Gado</button>
+        <div class="max-w-6xl mx-auto px-4 flex gap-6 pt-4 overflow-x-auto">
+            <button id="btn-tab-acerto" onclick="abrirAba('tab-acerto')" class="tab-btn pb-2 border-b-4 border-slate-800 text-slate-800 font-black uppercase text-sm whitespace-nowrap transition-all">Acerto DR</button>
+            <button id="btn-tab-estoque" onclick="abrirAba('tab-estoque')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Estoque DR</button>
+            <button id="btn-tab-projecao" onclick="abrirAba('tab-projecao')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Projeção</button>
+            <button id="btn-tab-custo" onclick="abrirAba('tab-custo')" class="tab-btn pb-2 border-b-4 border-transparent text-slate-500 font-bold uppercase text-sm whitespace-nowrap hover:text-slate-800 transition-all">Custo Mês</button>
         </div>
     </div>
 
     <div class="max-w-6xl mx-auto p-4 md:p-6">
         
         <!-- ========================================== -->
-        <!-- ABA 1: GESTÃO GERENCIAL -->
+        <!-- ABA 1: ACERTO DR -->
         <!-- ========================================== -->
-        <div id="tab-gestao" class="tab-content space-y-6">
-            <div class="bg-white rounded-xl shadow-sm p-5 border-l-8 border-slate-800 flex justify-between items-center">
-                <div>
-                    <h1 class="text-2xl font-black text-slate-800 uppercase tracking-tight">Painel Gerencial Consolidado</h1>
-                    <p class="text-xs font-bold text-slate-500 uppercase mt-1">Síntese do Estoque e Financeiro</p>
+        <div id="tab-acerto" class="tab-content space-y-4">
+            
+            <div class="p-4 bg-white rounded-xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
+                    <span class="text-xs font-bold text-slate-700 uppercase tracking-wide">Filtros de Consulta Financeira</span>
+                    <button onclick="limparFiltros()" class="text-[10px] text-emerald-700 font-bold uppercase hover:underline">Limpar Filtros</button>
                 </div>
-            </div>
-
-            <!-- KPIs -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 text-center">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Saldo Físico Atual</p>
-                    <h2 class="text-3xl font-black text-slate-800 mt-1" id="dash-cabecas">0</h2>
-                </div>
-                <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 text-center">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Custo Total de Aquisição</p>
-                    <h2 class="text-2xl font-black text-slate-800 mt-2" id="dash-custo-estoque">R$ 0,00</h2>
-                </div>
-                <div class="bg-emerald-50 p-5 rounded-xl shadow-sm border border-emerald-200 text-center">
-                    <p class="text-[10px] font-bold text-emerald-800 uppercase">Previsão Bruta (Por Fazenda)</p>
-                    <h2 class="text-2xl font-black text-emerald-700 mt-2" id="dash-previsao">R$ 0,00</h2>
-                </div>
-                <div class="bg-indigo-50 p-5 rounded-xl shadow-sm border border-indigo-200 text-center">
-                    <p class="text-[10px] font-bold text-indigo-800 uppercase">Resultado Projetado</p>
-                    <h2 class="text-2xl font-black text-indigo-700 mt-2" id="dash-resultado">R$ 0,00</h2>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Simulador por Fazenda -->
-                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-300 pb-2">Projeção de Vendas por Fazenda</h2>
-                    <div id="div-previsao-inputs" class="space-y-2">
-                        <p class="text-xs text-slate-400">Carregando informações do estoque...</p>
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase">Data Inicial</label>
+                        <input type="date" id="filtro-data-ini" onchange="atualizarAcerto()" class="w-full p-2 border rounded border-slate-300">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase">Data Final</label>
+                        <input type="date" id="filtro-data-fim" onchange="atualizarAcerto()" class="w-full p-2 border rounded border-slate-300">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase">Pagador</label>
+                        <select id="filtro-pagador" onchange="atualizarAcerto()" class="w-full p-2 border rounded border-slate-300 bg-white">
+                            <option value="">Todos</option><option value="Deivid">Deivid</option><option value="Ronei">Ronei</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase">Tipo</label>
+                        <select id="filtro-tipo" onchange="atualizarAcerto()" class="w-full p-2 border rounded border-slate-300 bg-white"><option value="">Todos</option></select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase">Categoria</label>
+                        <select id="filtro-categoria" onchange="atualizarAcerto()" class="w-full p-2 border rounded border-slate-300 bg-white"><option value="">Todas</option></select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-500 uppercase">Status</label>
+                        <select id="filtro-status" onchange="atualizarAcerto()" class="w-full p-2 border rounded border-slate-300 bg-white">
+                            <option value="">Todos</option><option value="concluidos">Concluídos</option><option value="pendentes">Pendentes</option>
+                        </select>
                     </div>
                 </div>
-
-                <!-- Estoque Consolidado -->
-                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                    <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-300 pb-2">Estoque do Rebanho</h2>
-                    <table class="w-full text-xs text-left mb-6">
-                        <thead>
-                            <tr class="bg-slate-100 text-slate-600 uppercase border-b border-slate-300">
-                                <th class="p-2.5 font-bold">Local</th>
-                                <th class="p-2.5 text-center font-bold">Macho</th>
-                                <th class="p-2.5 text-center font-bold">Fêmea</th>
-                                <th class="p-2.5 text-center font-black">Total</th>
-                            </tr>
-                        </thead>
-                        <tbody id="gestao-tbody-estoque"></tbody>
-                    </table>
-                </div>
             </div>
-        </div>
 
-        <!-- ========================================== -->
-        <!-- ABA 2: ACERTO FINANCEIRO (RESUMO) -->
-        <!-- ========================================== -->
-        <div id="tab-acerto" class="tab-content hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-sm p-5 border-l-8 border-emerald-800">
-                <h1 class="text-2xl font-black text-emerald-800 uppercase tracking-tight">Acerto DR - Lançamentos</h1>
-                <p class="text-xs text-slate-500 mt-1">Integração do módulo financeiro[cite: 3].</p>
-            </div>
-            
-            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
                 <table class="w-full text-xs text-left">
                     <thead>
-                        <tr class="bg-slate-800 text-white uppercase">
-                            <th class="p-2 text-center">Data</th>
-                            <th class="p-2">Descrição</th>
+                        <tr class="bg-emerald-800 text-white uppercase text-center font-bold">
+                            <th class="p-2 w-[5%]">Nº</th>
+                            <th class="p-2 w-[10%]">Data</th>
+                            <th class="p-2 text-left w-[40%]">Descrição / Classificação</th>
                             <th class="p-2 text-right">Aporte Ronei</th>
                             <th class="p-2 text-right">Aporte Deivid</th>
                             <th class="p-2 text-right">Saldo Acumulado</th>
                         </tr>
                     </thead>
-                    <tbody id="acerto-tbody"></tbody>
+                    <tbody id="acerto-tbody">
+                        <tr><td colspan="6" class="text-center py-4 text-slate-400">Carregando lançamentos...</td></tr>
+                    </tbody>
                 </table>
             </div>
         </div>
 
         <!-- ========================================== -->
-        <!-- ABA 3: ESTOQUE DE GADO (RESUMO) -->
+        <!-- ABA 2: ESTOQUE DR -->
         <!-- ========================================== -->
         <div id="tab-estoque" class="tab-content hidden space-y-6">
-            <div class="bg-white rounded-xl shadow-sm p-5 border-l-8 border-blue-800">
-                <h1 class="text-2xl font-black text-blue-800 uppercase tracking-tight">Estoque DR - Movimentações</h1>
-                <p class="text-xs text-slate-500 mt-1">Histórico de Compras, Vendas e Transferências[cite: 3].</p>
-            </div>
-
+            
             <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Ativos no Estoque (Saldo Atual)</h2>
                 <table class="w-full text-xs text-left">
                     <thead>
-                        <tr class="bg-blue-900 text-white uppercase">
-                            <th class="p-2 text-center">Data</th>
-                            <th class="p-2">Operação</th>
-                            <th class="p-2">Categoria</th>
-                            <th class="p-2 text-center">Cabeças</th>
-                            <th class="p-2">Logística (Origem ➔ Destino)</th>
-                            <th class="p-2 text-right">Valor (R$)</th>
+                        <tr class="bg-slate-100 text-slate-600 uppercase border-b border-slate-300">
+                            <th class="p-2 font-bold">Fazenda / Local</th>
+                            <th class="p-2 text-center font-bold">Macho</th>
+                            <th class="p-2 text-center font-bold">Fêmea</th>
+                            <th class="p-2 text-center font-black">Total de Cabeças</th>
                         </tr>
                     </thead>
-                    <tbody id="estoque-tbody"></tbody>
+                    <tbody id="estoque-tbody-ativos"></tbody>
+                </table>
+            </div>
+
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Histórico de Transações</h2>
+                <table class="w-full text-xs text-left">
+                    <thead>
+                        <tr class="bg-[#1f3b8b] text-white uppercase text-center font-bold">
+                            <th class="p-2">Data</th>
+                            <th class="p-2">Operação</th>
+                            <th class="p-2">Categoria</th>
+                            <th class="p-2">Cabeças</th>
+                            <th class="p-2 text-left">Logística (Origem ➔ Destino)</th>
+                            <th class="p-2 text-right">Valor Financeiro</th>
+                        </tr>
+                    </thead>
+                    <tbody id="estoque-tbody-hist"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- ABA 3: PROJEÇÃO -->
+        <!-- ========================================== -->
+        <div id="tab-projecao" class="tab-content hidden space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-center">
+                    <p class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Custo Total de Aquisição</p>
+                    <h2 class="text-2xl font-black text-slate-800 mt-2" id="proj-custo-estoque">R$ 0,00</h2>
+                </div>
+                <div class="bg-emerald-50 p-6 rounded-xl shadow-sm border border-emerald-200 text-center">
+                    <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-widest">Previsão Bruta de Venda</p>
+                    <h2 class="text-2xl font-black text-emerald-700 mt-2" id="proj-bruta">R$ 0,00</h2>
+                </div>
+                <div class="bg-indigo-50 p-6 rounded-xl shadow-sm border border-indigo-200 text-center">
+                    <p class="text-[11px] font-bold text-indigo-800 uppercase tracking-widest">Resultado Projetado</p>
+                    <h2 class="text-2xl font-black text-indigo-700 mt-2" id="proj-resultado">R$ 0,00</h2>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 max-w-2xl mx-auto">
+                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Simulador de Preço Médio por Fazenda</h2>
+                <div id="div-projecao-inputs" class="space-y-3">
+                    <p class="text-xs text-slate-400">Carregando ativos...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- ABA 4: CUSTO CABEÇA / MÊS -->
+        <!-- ========================================== -->
+        <div id="tab-custo" class="tab-content hidden">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 max-w-3xl mx-auto">
+                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b border-slate-200 pb-2">Evolução do Custo Cabeça / Mês</h2>
+                <table class="w-full text-xs text-left">
+                    <thead>
+                        <tr class="bg-slate-800 text-white uppercase">
+                            <th class="p-3 text-center">Mês/Ano</th>
+                            <th class="p-3 text-center">Média Cab.</th>
+                            <th class="p-3 text-right">Despesas Operac. (Rateadas)</th>
+                            <th class="p-3 text-right">Custo Cab/Mês</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-custo-mensal">
+                        <tr><td colspan="4" class="text-center p-4 text-slate-400">Carregando cálculo...</td></tr>
+                    </tbody>
                 </table>
             </div>
         </div>
