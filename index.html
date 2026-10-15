@@ -3,19 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sociedade DR - Gestão Financeira</title>
+    <title>Gestão Pecuária DR - Análise Geral</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
     <!-- Biblioteca para Gerar Excel (.xlsx) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
-    <!-- SDKs do Firebase v10/v12 via CDN -->
+    <!-- SDKs do Firebase v10 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // CHAVES REAIS DO TEU PROJETO FIREBASE (SOCIEDADE DR)
+        // CHAVE DO FIREBASE (BANCO DE DADOS DA SOCIEDADE)
         const firebaseConfig = {
             apiKey: "AIzaSyDgnDHu-dHCo5oZRo113M5jQ1kxwX9_1uE",
             authDomain: "sociedade-dr.firebaseapp.com",
@@ -26,104 +25,186 @@
             measurementId: "G-18PGSQ0RKF"
         };
 
-        // Inicializa o Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
-        const colRef = collection(db, "lancamentos_dr");
+        const colGestaoRef = collection(db, "gestao_geral_dr");
 
-        let lancamentos = [];
+        let registros = [];
 
-        // ESCUTA EM TEMPO REAL OS DADOS DO FIRESTORE (SINCRONIZAÇÃO AUTOMÁTICA)
-        const q = query(colRef, orderBy("data", "asc"));
+        // ESCUTAR LANÇAMENTOS EM TEMPO REAL
+        const q = query(colGestaoRef, orderBy("data", "asc"));
         onSnapshot(q, (snapshot) => {
-            lancamentos = [];
+            registros = [];
             snapshot.forEach((documento) => {
-                lancamentos.push({
+                registros.push({
                     idDoc: documento.id,
                     ...documento.data()
                 });
             });
-            atualizarTela();
-        }, (error) => {
-            console.error("Erro no Firestore: ", error);
+            atualizarPainelETabela();
         });
 
-        // SALVAR NOVO LANÇAMENTO
-        document.getElementById('form-lancamento').addEventListener('submit', async function(e) {
-            e.preventDefault();
+        // ALTERNAR CAMPOS DO FORMULÁRIO CONFORME O TIPO DE OPERAÇÃO
+        window.mudarTipoOperacao = function() {
+            const tipo = document.getElementById('tipo-operacao').value;
+            const containerGado = document.getElementById('campos-gado');
+            
+            if (tipo === 'Despesa') {
+                containerGado.classList.add('hidden');
+                document.getElementById('qtd-cabecas').required = false;
+                document.getElementById('peso-kg').required = false;
+            } else {
+                containerGado.classList.remove('hidden');
+                document.getElementById('qtd-cabecas').required = true;
+                
+                if (tipo === 'Transferência' || tipo === 'Morte') {
+                    document.getElementById('valor').required = false;
+                    document.getElementById('peso-kg').required = false;
+                } else {
+                    document.getElementById('valor').required = true;
+                    document.getElementById('peso-kg').required = true;
+                }
+            }
+        };
 
-            const descricao = document.getElementById('descricao').value;
-            const valor = parseFloat(document.getElementById('valor').value);
+        // SALVAR NOVO REGISTRO
+        document.getElementById('form-gestao').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btnSubmit = document.getElementById('btn-submit');
+            btnSubmit.disabled = true;
+            btnSubmit.innerText = "Salvando...";
+
+            const tipoOperacao = document.getElementById('tipo-operacao').value;
             const data = document.getElementById('data').value;
-            const categoria = document.getElementById('categoria').value;
-            const socio = document.getElementById('socio-pagador').value;
+            const descricao = document.getElementById('descricao').value;
+            const local = document.getElementById('local').value;
+            const valor = parseFloat(document.getElementById('valor').value) || 0;
+            
+            let qtdCabecas = 0;
+            let pesoKg = 0;
+
+            if (tipoOperacao !== 'Despesa') {
+                qtdCabecas = parseInt(document.getElementById('qtd-cabecas').value) || 0;
+                pesoKg = parseFloat(document.getElementById('peso-kg').value) || 0;
+            }
 
             try {
-                await addDoc(colRef, {
-                    descricao,
-                    valor,
-                    data,
-                    categoria,
-                    socio,
-                    criadoEm: new Date().toISOString()
+                await addDoc(colGestaoRef, {
+                    tipoOperacao, data, descricao, local, valor, qtdCabecas, pesoKg, criadoEm: new Date().toISOString()
                 });
-
-                document.getElementById('descricao').value = '';
-                document.getElementById('valor').value = '';
+                document.getElementById('form-gestao').reset();
+                document.getElementById('data').value = new Date().toISOString().split('T')[0];
+                window.mudarTipoOperacao();
+                alert("Registro salvo com sucesso!");
             } catch (err) {
-                alert("Erro ao salvar no banco de dados em nuvem: " + err.message + "\n\nVerifique se ativou o Firestore Database em 'Modo de Teste' no console do Firebase!");
+                alert("Erro ao salvar: " + err.message);
+            } finally {
+                btnSubmit.disabled = false;
+                btnSubmit.innerText = "Registrar Operação";
             }
         });
 
-        // EXCLUIR LANÇAMENTO
+        // APAGAR REGISTRO
         window.apagarItem = async function(idDoc) {
-            if(confirm("Deseja excluir este lançamento permanentemente da nuvem?")) {
+            if(confirm("Deseja excluir este registro permanentemente?")) {
                 try {
-                    await deleteDoc(doc(db, "lancamentos_dr", idDoc));
+                    await deleteDoc(doc(db, "gestao_geral_dr", idDoc));
                 } catch(err) {
                     alert("Erro ao excluir: " + err.message);
                 }
             }
         };
 
-        // EXPORTAR PARA EXCEL (.XLSX)
-        window.exportarExcel = function() {
-            if (lancamentos.length === 0) {
-                alert("Não há lançamentos registrados para exportar.");
-                return;
+        // CALCULAR INDICADORES E ATUALIZAR TABELA
+        function atualizarPainelETabela() {
+            const corpoTabela = document.getElementById('tabela-corpo');
+            corpoTabela.innerHTML = '';
+
+            let totalCabecas = 0;
+            let totalDespesas = 0;
+            
+            // Variáveis para Ganho de Peso Médio
+            let totalCabecasCompradas = 0;
+            let pesoTotalCompra = 0;
+            let totalCabecasVendidas = 0;
+            let pesoTotalVenda = 0;
+
+            if (registros.length === 0) {
+                corpoTabela.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-slate-400">Nenhum registro encontrado.</td></tr>';
             }
 
-            let totalRonei = 0;
-            let totalDeivid = 0;
+            // Processar cálculos e tabela
+            registros.forEach((item, index) => {
+                // 1. Lógica de Estoque e Peso
+                if (item.tipoOperacao === 'Compra') {
+                    totalCabecas += item.qtdCabecas;
+                    totalCabecasCompradas += item.qtdCabecas;
+                    pesoTotalCompra += item.pesoKg;
+                } else if (item.tipoOperacao === 'Venda' || item.tipoOperacao === 'Abate') {
+                    totalCabecas -= item.qtdCabecas;
+                    totalCabecasVendidas += item.qtdCabecas;
+                    pesoTotalVenda += item.pesoKg;
+                } else if (item.tipoOperacao === 'Morte') {
+                    totalCabecas -= item.qtdCabecas;
+                }
+                
+                // 2. Lógica de Custo
+                if (item.tipoOperacao === 'Despesa') {
+                    totalDespesas += item.valor;
+                }
 
-            const dadosExcel = lancamentos.map((item, index) => {
-                let aporteRonei = (item.socio === 'Ronei') ? item.valor : 0;
-                let aporteDeivid = (item.socio === 'Deivid') ? item.valor : 0;
+                // Renderizar Linha da Tabela
+                let estiloOperacao = "text-slate-700";
+                if (item.tipoOperacao === 'Compra') estiloOperacao = "text-blue-600 font-bold";
+                if (item.tipoOperacao === 'Venda') estiloOperacao = "text-emerald-600 font-bold";
+                if (item.tipoOperacao === 'Despesa') estiloOperacao = "text-red-600 font-bold";
 
-                totalRonei += aporteRonei;
-                totalDeivid += aporteDeivid;
-
-                let saldoMomento = (totalDeivid - totalRonei) / 2.0;
-
-                return {
-                    "Lançamento": index + 1,
-                    "Data": formatarData(item.data),
-                    "Descrição": item.descricao,
-                    "Categoria": item.categoria,
-                    "Sócio Pagador": item.socio,
-                    "Ronei (Bolso)": aporteRonei,
-                    "Deivid (Bolso)": aporteDeivid,
-                    "Saldo Acumulado Deivid (R$)": saldoMomento
-                };
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-slate-200 hover:bg-slate-50";
+                tr.innerHTML = `
+                    <td class="p-2 text-center whitespace-nowrap">${formatarData(item.data)}</td>
+                    <td class="p-2 font-medium ${estiloOperacao}">${item.tipoOperacao}</td>
+                    <td class="p-2 text-slate-800">${item.descricao} <br><span class="text-[10px] text-slate-500">📍 ${item.local}</span></td>
+                    <td class="p-2 text-center font-bold">${item.qtdCabecas > 0 ? item.qtdCabecas : '-'}</td>
+                    <td class="p-2 text-center">${item.pesoKg > 0 ? item.pesoKg + ' kg' : '-'}</td>
+                    <td class="p-2 text-right font-mono">${item.valor > 0 ? 'R$ ' + item.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '-'}</td>
+                    <td class="p-2 text-center no-print">
+                        <button onclick="apagarItem('${item.idDoc}')" class="text-red-500 hover:text-red-700 text-[10px] font-bold uppercase">Excluir</button>
+                    </td>
+                `;
+                corpoTabela.appendChild(tr);
             });
 
-            const worksheet = XLSX.utils.json_to_sheet(dadosExcel);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Sociedade DR");
+            // Atualizar Dashboard
+            document.getElementById('dash-cabecas').innerText = totalCabecas;
+            
+            // Custo Cabeça Mês (Total Despesas / Total Cabeças) - Simples para visão geral
+            let custoCabeca = 0;
+            if (totalCabecas > 0) {
+                custoCabeca = totalDespesas / totalCabecas;
+            }
+            document.getElementById('dash-custo').innerText = `R$ ${custoCabeca.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 
-            const dataAtual = new Date().toISOString().slice(0,10);
-            XLSX.writeFile(workbook, `Extrato_Sociedade_DR_${dataAtual}.xlsx`);
-        };
+            // Taxa de Ganho de Peso (Média de Venda - Média de Compra)
+            let ganhoMedio = 0;
+            if (totalCabecasCompradas > 0 && totalCabecasVendidas > 0) {
+                let mediaCompra = pesoTotalCompra / totalCabecasCompradas;
+                let mediaVenda = pesoTotalVenda / totalCabecasVendidas;
+                ganhoMedio = mediaVenda - mediaCompra;
+            }
+            
+            let dashPeso = document.getElementById('dash-peso');
+            if (ganhoMedio > 0) {
+                dashPeso.innerText = `+ ${ganhoMedio.toFixed(1)} kg / cab`;
+                dashPeso.className = "text-2xl font-black text-emerald-600";
+            } else if (ganhoMedio < 0) {
+                dashPeso.innerText = `${ganhoMedio.toFixed(1)} kg / cab`;
+                dashPeso.className = "text-2xl font-black text-red-600";
+            } else {
+                dashPeso.innerText = "Aguardando Vendas";
+                dashPeso.className = "text-lg font-bold text-slate-500 mt-1";
+            }
+        }
 
         function formatarData(dataStr) {
             if(!dataStr) return '';
@@ -131,297 +212,132 @@
             return `${partes[2]}/${partes[1]}/${partes[0]}`;
         }
 
-        function atualizarTela() {
-            const corpoTabela = document.getElementById('tabela-corpo');
-            corpoTabela.innerHTML = '';
+        window.gerarPDF = function() { window.print(); };
 
-            const filtroDataIni = document.getElementById('filtro-data-ini').value;
-            const filtroDataFim = document.getElementById('filtro-data-fim').value;
-            const filtroPagador = document.getElementById('filtro-pagador').value;
-            const filtroCategoria = document.getElementById('filtro-categoria').value;
-            const filtroValorMin = parseFloat(document.getElementById('filtro-valor-min').value) || 0;
-
-            let lancamentosFiltrados = lancamentos.filter(item => {
-                if (filtroDataIni && item.data < filtroDataIni) return false;
-                if (filtroDataFim && item.data > filtroDataFim) return false;
-                if (filtroPagador && item.socio !== filtroPagador) return false;
-                if (filtroCategoria && item.categoria !== filtroCategoria) return false;
-                if (filtroValorMin > 0 && item.valor < filtroValorMin) return false;
-                return true;
-            });
-
-            let totalRonei = 0;
-            let totalDeivid = 0;
-            let saldoAcumulado = 0;
-
-            if (lancamentosFiltrados.length === 0) {
-                corpoTabela.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-slate-400">Nenhum lançamento encontrado na nuvem.</td></tr>';
-            }
-
-            lancamentosFiltrados.forEach((item, index) => {
-                let aporteRonei = (item.socio === 'Ronei') ? item.valor : 0;
-                let aporteDeivid = (item.socio === 'Deivid') ? item.valor : 0;
-
-                totalRonei += aporteRonei;
-                totalDeivid += aporteDeivid;
-
-                saldoAcumulado = (totalDeivid - totalRonei) / 2.0;
-
-                let corTexto = saldoAcumulado > 0 ? 'text-emerald-700 font-bold' : (saldoAcumulado < 0 ? 'text-red-700 font-bold' : 'text-slate-700');
-                let sinalTexto = saldoAcumulado > 0 ? '🟢 + ' : (saldoAcumulado < 0 ? '🔴 - ' : '');
-
-                const tr = document.createElement('tr');
-                tr.className = 'border-b border-slate-200 hover:bg-slate-50';
-                tr.innerHTML = `
-                    <td class="p-1.5 text-center font-mono text-slate-500">[${index + 1}]</td>
-                    <td class="p-1.5 text-center">${formatarData(item.data)}</td>
-                    <td class="p-1.5 font-medium text-slate-800">${item.descricao} <span class="text-[10px] text-slate-400 font-normal">(${item.categoria})</span></td>
-                    <td class="p-1.5 text-right font-mono">${aporteRonei > 0 ? 'R$ ' + aporteRonei.toLocaleString('pt-BR', {minimumFractionDigits: 2}) : 'R$ 0,00'}</td>
-                    <td class="p-1.5 text-right font-mono">${aporteDeivid > 0 ? 'R$ ' + aporteDeivid.toLocaleString('pt-BR', {minimumFractionDigits: 2}) : 'R$ 0,00'}</td>
-                    <td class="p-1.5 text-right font-mono ${corTexto}">${sinalTexto}R$ ${Math.abs(saldoAcumulado).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</td>
-                    <td class="p-1.5 text-center no-print">
-                        <button onclick="apagarItem('${item.idDoc}')" class="text-slate-400 hover:text-red-600 text-[10px]">❌</button>
-                    </td>
-                `;
-                corpoTabela.appendChild(tr);
-            });
-
-            document.getElementById('resumo-ronei').innerText = `R$ ${totalRonei.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
-            document.getElementById('resumo-deivid').innerText = `R$ ${totalDeivid.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
-            
-            const diferencaBruta = totalDeivid - totalRonei;
-            const resumoDiferencaElem = document.getElementById('resumo-diferenca');
-            resumoDiferencaElem.innerText = `${diferencaBruta >= 0 ? '' : '- '}R$ ${Math.abs(diferencaBruta).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
-            resumoDiferencaElem.className = `p-2 text-right font-mono font-bold ${diferencaBruta < 0 ? 'text-red-700' : 'text-emerald-700'}`;
-
-            const posicaoLiquida = (totalDeivid - totalRonei) / 2.0;
-            const resumoPosicaoElem = document.getElementById('resumo-posicao');
-
-            if (posicaoLiquida > 0) {
-                resumoPosicaoElem.innerText = `DEIVID TEM A RECEBER R$ ${posicaoLiquida.toLocaleString('pt-BR', {minimumFractionDigits: 2})} DE RONEI`;
-                resumoPosicaoElem.className = 'p-2 text-right font-bold text-emerald-700';
-            } else if (posicaoLiquida < 0) {
-                resumoPosicaoElem.innerText = `DEIVID DEVE R$ ${Math.abs(posicaoLiquida).toLocaleString('pt-BR', {minimumFractionDigits: 2})} PARA RONEI`;
-                resumoPosicaoElem.className = 'p-2 text-right font-bold text-red-700';
-            } else {
-                resumoPosicaoElem.innerText = 'SALDOS ZERADOS / QUITADOS';
-                resumoPosicaoElem.className = 'p-2 text-right font-bold text-slate-700';
-            }
-        }
-
-        window.limparFiltros = function() {
-            document.getElementById('filtro-data-ini').value = '';
-            document.getElementById('filtro-data-fim').value = '';
-            document.getElementById('filtro-pagador').value = '';
-            document.getElementById('filtro-categoria').value = '';
-            document.getElementById('filtro-valor-min').value = '';
-            atualizarTela();
+        window.onload = () => {
+            document.getElementById('data').value = new Date().toISOString().split('T')[0];
         };
-
-        window.gerarPDF = function() {
-            window.print();
-        };
-
-        document.getElementById('data').valueAsDate = new Date();
-        document.getElementById('data-extrato').innerText = new Date().toLocaleDateString('pt-BR');
     </script>
-
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; }
-
         @media print {
             .no-print { display: none !important; }
-            body { background: #ffffff !important; padding: 0 !important; color: #0f172a !important; }
-            .print-container { max-width: 100% !important; box-shadow: none !important; border: none !important; padding: 0 !important; margin: 0 !important; }
-            @page { size: A4 portrait; margin: 1.2cm; }
-            .page-block { break-inside: avoid !important; page-break-inside: avoid !important; }
-            table.data-table { width: 100% !important; border-collapse: collapse !important; table-layout: fixed !important; }
-            table.data-table th { background-color: #065f46 !important; color: #ffffff !important; font-weight: bold !important; padding: 6px 8px !important; font-size: 8pt !important; border: 1px solid #065f46 !important; }
-            table.data-table td { padding: 6px 8px !important; border: 1px solid #cbd5e1 !important; font-size: 8.5pt !important; }
-            .summary-table { width: 60% !important; margin-left: auto !important; border: 1.5px solid #0f172a !important; border-collapse: collapse !important; break-inside: avoid !important; }
-            .summary-table th { background-color: #1e293b !important; color: #ffffff !important; padding: 6px 8px !important; font-size: 8.5pt !important; }
-            .summary-table td { padding: 6px 8px !important; border-bottom: 1px solid #e2e8f0 !important; font-size: 8.5pt !important; }
+            html, body { background: #ffffff !important; margin: 0; }
         }
     </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-3 md:p-6">
+<body class="bg-slate-100 min-h-screen p-2 md:p-6">
 
-    <div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden p-4 md:p-6 print-container">
+    <div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden p-4 md:p-6">
         
-        <!-- CABEÇALHO DO EXTRATO -->
-        <div class="border-b-2 border-emerald-800 pb-3 mb-4 flex justify-between items-end page-block">
+        <!-- CABEÇALHO -->
+        <div class="border-b-2 border-emerald-800 pb-3 mb-5 flex justify-between items-center">
             <div>
-                <h1 class="text-xl md:text-2xl font-bold text-emerald-800 uppercase tracking-tight">EXTRATO DE CONCILIAÇÃO E ACERTO DE SÓCIOS</h1>
-                <p class="text-xs font-bold text-slate-600">SOCIEDADE DR</p>
+                <h1 class="text-xl md:text-3xl font-bold text-emerald-800 uppercase tracking-tight">Gestão Geral - Sociedade DR</h1>
+                <p class="text-sm font-bold text-slate-600">Estoque, Custos e Desempenho do Rebanho</p>
             </div>
-            <div class="text-right text-[11px] text-slate-600 leading-tight">
-                <p><b>Operador do App:</b> Deivid</p>
-                <p><b>Sócio Parceiro:</b> Ronei</p>
-                <p><b>Emissão:</b> <span id="data-extrato">--/--/----</span></p>
+            <button onclick="gerarPDF()" class="no-print bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase shadow">
+                Imprimir Relatório
+            </button>
+        </div>
+
+        <!-- DASHBOARD (INDICADORES) -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-slate-50 border-l-4 border-blue-600 p-4 rounded shadow-sm">
+                <p class="text-xs font-bold text-slate-500 uppercase">Estoque Físico Atual</p>
+                <h2 class="text-3xl font-black text-slate-800" id="dash-cabecas">0</h2>
+                <p class="text-[10px] text-slate-400 mt-1">Total de cabeças na fazenda</p>
+            </div>
+            
+            <div class="bg-slate-50 border-l-4 border-red-500 p-4 rounded shadow-sm">
+                <p class="text-xs font-bold text-slate-500 uppercase">Custo Cabeça / Mês Médio</p>
+                <h2 class="text-3xl font-black text-red-600" id="dash-custo">R$ 0,00</h2>
+                <p class="text-[10px] text-slate-400 mt-1">Despesas divididas pelo total de cabeças</p>
+            </div>
+
+            <div class="bg-slate-50 border-l-4 border-emerald-500 p-4 rounded shadow-sm">
+                <p class="text-xs font-bold text-slate-500 uppercase">Taxa de Ganho de Peso</p>
+                <h2 class="text-2xl font-black text-emerald-600" id="dash-peso">Aguardando Vendas</h2>
+                <p class="text-[10px] text-slate-400 mt-1">Diferença de peso (Venda x Compra)</p>
             </div>
         </div>
 
-        <!-- FORMULÁRIO DE LANÇAMENTO RÁPIDO (OCULTO NO PDF) -->
-        <div class="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200 no-print">
-            <h2 class="text-sm font-bold text-slate-700 mb-3 flex items-center gap-1">➕ Novo Lançamento Rápido</h2>
-            <form id="form-lancamento" class="space-y-3">
-                
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <!-- FORMULÁRIO DE LANÇAMENTO -->
+        <div class="mb-6 p-4 bg-emerald-50/50 rounded-xl border border-emerald-200 no-print">
+            <h2 class="text-sm font-bold text-emerald-900 uppercase mb-3">Registrar Nova Operação</h2>
+            
+            <form id="form-gestao" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 uppercase">Tipo</label>
+                        <select id="tipo-operacao" onchange="mudarTipoOperacao()" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300 font-bold bg-white outline-none focus:border-emerald-500">
+                            <option value="Compra">Entrada (Compra de Gado)</option>
+                            <option value="Venda">Saída (Venda/Abate)</option>
+                            <option value="Transferência">Transferência de Pasto</option>
+                            <option value="Morte">Morte de Animal</option>
+                            <option value="Despesa">Despesa Operacional (Custo)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 uppercase">Data</label>
+                        <input type="date" id="data" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300 bg-white outline-none">
+                    </div>
                     <div class="md:col-span-2">
-                        <label class="block text-xs font-medium text-slate-600">Descrição / Histórico</label>
-                        <input type="text" id="descricao" placeholder="Ex: Arrendamento Dinei, Quirela CVALE, Diária" required class="w-full mt-1 p-2 border rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 border-slate-300">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-600">Categoria</label>
-                        <select id="categoria" class="w-full mt-1 p-2 border rounded-lg text-sm border-slate-300 bg-white">
-                            <option value="Arrendamento">Arrendamento</option>
-                            <option value="Nutrição / Ração">Nutrição / Ração</option>
-                            <option value="Mão de Obra">Mão de Obra</option>
-                            <option value="Infraestrutura">Infraestrutura / Benfeitorias</option>
-                            <option value="Frete / Logística">Frete / Logística</option>
-                            <option value="Compra de Gado">Compra de Gado</option>
-                            <option value="Impostos / Taxas">Impostos / Taxas</option>
-                            <option value="Outros">Outros</option>
-                        </select>
+                        <label class="block text-xs font-bold text-slate-600 uppercase">Descrição / Identificação do Lote</label>
+                        <input type="text" id="descricao" placeholder="Ex: Lote 01 Bezerros / Salário Mês / Ração" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300 outline-none">
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 border-t border-emerald-100 pt-3">
                     <div>
-                        <label class="block text-xs font-medium text-slate-600">Valor (R$)</label>
-                        <input type="number" step="0.01" id="valor" placeholder="0,00" required class="w-full mt-1 p-2 border rounded-lg text-sm border-slate-300">
+                        <label class="block text-xs font-bold text-slate-600 uppercase">Fazenda / Local</label>
+                        <input type="text" id="local" placeholder="Ex: Arrendamento Dinei" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300 outline-none">
                     </div>
                     <div>
-                        <label class="block text-xs font-medium text-slate-600">Data do Pagamento</label>
-                        <input type="date" id="data" required class="w-full mt-1 p-2 border rounded-lg text-sm border-slate-300">
+                        <label class="block text-xs font-bold text-emerald-800 uppercase">Valor Total (R$)</label>
+                        <input type="number" step="0.01" id="valor" placeholder="0.00" class="w-full mt-1 p-2 border rounded-md text-sm border-emerald-300 bg-emerald-50 outline-none">
                     </div>
-                    <div>
-                        <label class="block text-xs font-bold text-emerald-800">Quem Pagou? (Sócio)</label>
-                        <select id="socio-pagador" class="w-full mt-1 p-2 border border-emerald-600 rounded-lg text-sm bg-emerald-50 font-bold text-slate-800">
-                            <option value="Deivid">Deivid</option>
-                            <option value="Ronei">Ronei</option>
-                        </select>
+                    
+                    <!-- Campos Exclusivos de Gado -->
+                    <div id="campos-gado" class="md:col-span-2 flex gap-4">
+                        <div class="w-1/2">
+                            <label class="block text-xs font-bold text-blue-800 uppercase">Quantas Cabeças?</label>
+                            <input type="number" id="qtd-cabecas" placeholder="Ex: 40" required class="w-full mt-1 p-2 border rounded-md text-sm border-blue-300 bg-blue-50 outline-none">
+                        </div>
+                        <div class="w-1/2">
+                            <label class="block text-xs font-bold text-orange-800 uppercase">Peso Total (KG)</label>
+                            <input type="number" step="0.1" id="peso-kg" placeholder="Ex: 8500" class="w-full mt-1 p-2 border rounded-md text-sm border-orange-300 bg-orange-50 outline-none">
+                        </div>
                     </div>
                 </div>
 
-                <button type="submit" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-lg text-sm transition shadow">
-                    ☁️ Salvar no Banco de Dados (Nuvem)
-                </button>
+                <div class="pt-2">
+                    <button type="submit" id="btn-submit" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 rounded-lg text-sm transition uppercase shadow">
+                        Registrar Operação
+                    </button>
+                </div>
             </form>
         </div>
 
-        <!-- BARRA DE FILTROS AVANÇADOS (OCULTO NO PDF) -->
-        <div class="mb-4 p-3 bg-slate-100 rounded-xl border border-slate-200 no-print">
-            <div class="flex justify-between items-center mb-2">
-                <span class="text-xs font-bold text-slate-700 flex items-center gap-1">🔍 Filtros de Consulta</span>
-                <button onclick="limparFiltros()" class="text-[11px] text-emerald-700 font-semibold hover:underline">Limpar Filtros</button>
-            </div>
-            
-            <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
-                <div>
-                    <label class="block text-[10px] text-slate-500">Data Inicial</label>
-                    <input type="date" id="filtro-data-ini" onchange="atualizarTela()" class="w-full p-1.5 border rounded border-slate-300">
-                </div>
-                <div>
-                    <label class="block text-[10px] text-slate-500">Data Final</label>
-                    <input type="date" id="filtro-data-fim" onchange="atualizarTela()" class="w-full p-1.5 border rounded border-slate-300">
-                </div>
-                <div>
-                    <label class="block text-[10px] text-slate-500">Quem Pagou?</label>
-                    <select id="filtro-pagador" onchange="atualizarTela()" class="w-full p-1.5 border rounded border-slate-300 bg-white">
-                        <option value="">Todos</option>
-                        <option value="Deivid">Deivid</option>
-                        <option value="Ronei">Ronei</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-[10px] text-slate-500">Categoria</label>
-                    <select id="filtro-categoria" onchange="atualizarTela()" class="w-full p-1.5 border rounded border-slate-300 bg-white">
-                        <option value="">Todas</option>
-                        <option value="Arrendamento">Arrendamento</option>
-                        <option value="Nutrição / Ração">Nutrição / Ração</option>
-                        <option value="Mão de Obra">Mão de Obra</option>
-                        <option value="Infraestrutura">Infraestrutura</option>
-                        <option value="Frete / Logística">Frete / Logística</option>
-                        <option value="Compra de Gado">Compra de Gado</option>
-                        <option value="Impostos / Taxas">Impostos / Taxas</option>
-                        <option value="Outros">Outros</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-[10px] text-slate-500">Valor Mínimo (R$)</label>
-                    <input type="number" id="filtro-valor-min" placeholder="0,00" oninput="atualizarTela()" class="w-full p-1.5 border rounded border-slate-300">
-                </div>
-            </div>
-        </div>
-
-        <!-- CONTROLES DO APLICATIVO (OCULTO NO PDF) -->
-        <div class="flex justify-between items-center mb-3 no-print">
-            <h2 class="text-sm font-bold text-slate-700">📋 Extrato em Nuvem</h2>
-            <div class="flex gap-2">
-                <button onclick="exportarExcel()" class="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 shadow">
-                    📊 Exportar para Excel (.xlsx)
-                </button>
-                <button onclick="gerarPDF()" class="bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 shadow">
-                    🖨️ Imprimir / Gerar PDF
-                </button>
-            </div>
-        </div>
-
-        <!-- TABELA DE LANÇAMENTOS E CONCILIAÇÃO -->
-        <div class="overflow-x-auto mb-4 page-block">
-            <table class="data-table w-full text-xs border-collapse border border-slate-300">
+        <!-- TABELA DE HISTÓRICO -->
+        <h2 class="text-sm font-bold text-slate-700 uppercase mb-2">Histórico de Operações e Custos</h2>
+        <div class="overflow-x-auto border border-slate-300 rounded">
+            <table class="w-full text-xs border-collapse">
                 <thead>
-                    <tr class="bg-emerald-800 text-white text-center font-bold">
-                        <th class="p-1.5 border border-emerald-800 w-[6%]">Lanç.</th>
-                        <th class="p-1.5 border border-emerald-800 w-[11%]">Data</th>
-                        <th class="p-1.5 border border-emerald-800 text-left w-[33%]">Descrição / Categoria</th>
-                        <th class="p-1.5 border border-emerald-800 text-right w-[15%]">Ronei (Bolso)</th>
-                        <th class="p-1.5 border border-emerald-800 text-right w-[15%]">Deivid (Bolso)</th>
-                        <th class="p-1.5 border border-emerald-800 text-right w-[15%]">Saldo Acumulado</th>
-                        <th class="p-1.5 border border-emerald-800 w-[5%] no-print">Excl.</th>
+                    <tr class="bg-slate-800 text-white text-center font-bold">
+                        <th class="p-2 border-b border-slate-700 w-[10%]">DATA</th>
+                        <th class="p-2 border-b border-slate-700 w-[15%]">TIPO</th>
+                        <th class="p-2 border-b border-slate-700 text-left w-[35%]">DESCRIÇÃO / LOCAL</th>
+                        <th class="p-2 border-b border-slate-700 w-[10%]">CABEÇAS</th>
+                        <th class="p-2 border-b border-slate-700 w-[10%]">PESO (KG)</th>
+                        <th class="p-2 border-b border-slate-700 text-right w-[12%]">VALOR (R$)</th>
+                        <th class="p-2 border-b border-slate-700 w-[8%] no-print">AÇÃO</th>
                     </tr>
                 </thead>
                 <tbody id="tabela-corpo">
-                    <tr>
-                        <td colspan="7" class="text-center py-4 text-slate-400">Carregando dados da nuvem...</td>
-                    </tr>
+                    <tr><td colspan="7" class="text-center py-4 text-slate-400">Carregando dados...</td></tr>
                 </tbody>
             </table>
-        </div>
-
-        <!-- RESUMO CONSOLIDADO DO ACERTO -->
-        <div class="flex justify-end mt-4 page-block">
-            <table class="summary-table w-full md:w-3/5 border-1.5 border-slate-900 text-xs rounded overflow-hidden">
-                <thead>
-                    <tr class="bg-slate-800 text-white font-bold uppercase text-center">
-                        <th colspan="2" class="p-2">Resumo Consolidado do Acerto</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-200">
-                    <tr>
-                        <td class="p-2">Total Aportado por <b>RONEI</b>:</td>
-                        <td class="p-2 text-right font-mono font-bold" id="resumo-ronei">R$ 0,00</td>
-                    </tr>
-                    <tr>
-                        <td class="p-2">Total Aportado por <b>DEIVID</b>:</td>
-                        <td class="p-2 text-right font-mono font-bold" id="resumo-deivid">R$ 0,00</td>
-                    </tr>
-                    <tr>
-                        <td class="p-2">Diferença Bruta de Aportes (Deivid - Ronei):</td>
-                        <td class="p-2 text-right font-mono font-bold" id="resumo-diferenca">R$ 0,00</td>
-                    </tr>
-                    <tr class="bg-slate-100 font-bold">
-                        <td class="p-2">POSIÇÃO FINAL ATUALIZADA:</td>
-                        <td class="p-2 text-right font-bold text-emerald-700" id="resumo-posicao">SALDOS ZERADOS</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- RODAPÉ DA FOLHA IMPRESSA -->
-        <div class="hidden print:block mt-8 pt-2 border-t border-slate-300 text-center text-[10px] text-slate-400 page-block">
-            Documento oficial de prestação de contas — Sociedade DR (Deivid & Ronei) • Gerado pelo Aplicativo de Gestão Financeira.
         </div>
 
     </div>
