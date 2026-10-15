@@ -28,9 +28,9 @@
         let lancamentos = [];
         let movimentacoes = [];
         
-        // Mapeamento de Sexo
-        const machos = ['Bezerro', 'Garrote', 'Boi Gordo', 'Touro', 'Macho'];
-        const femeas = ['Bezerra', 'Novilha', 'Vaca', 'Matriz', 'Fêmea'];
+        // Mapeamento de Sexo baseado nas categorias do Estoque DR
+        const machos = ['Bezerros (M)', 'Bezerros', 'Garrotes (M)', 'Garrotes', 'Boi Magro', 'Boi Gordo', 'Touros'];
+        const femeas = ['Bezerras (F)', 'Bezerras', 'Novilhas (F)', 'Novilhas', 'Vacas'];
 
         // ESCUTAR DADOS EM TEMPO REAL
         onSnapshot(query(colFinanceiro, orderBy("data", "asc")), (snap) => {
@@ -51,7 +51,7 @@
             processarEstoque();
             processarDespesas();
             processarCustoMensal();
-            calcularPrevisao(); // Atualiza a previsão com os valores padrão
+            calcularPrevisao(); 
         }
 
         // 1. PROCESSAR ESTOQUE E CUSTO INVESTIDO
@@ -62,39 +62,38 @@
             let categoriasEstoque = {};
 
             movimentacoes.forEach(mov => {
-                const qtd = parseInt(mov.qtdCabecas) || 0;
-                const valor = parseFloat(mov.valorTotal) || parseFloat(mov.valor) || 0; // Depende de como foi salvo no Estoque DR
+                const qtd = parseInt(mov.quantidade) || 0; // Ajustado para o padrão do Estoque DR
+                const valor = parseFloat(mov.valorFinanceiro) || 0; // Ajustado para o padrão do Estoque DR
                 const cat = mov.categoria || 'Outros';
+                const tipo = mov.tipo; // Ajustado
                 
                 // Tratar Origem e Destino
-                let localAdd = mov.tipoOperacao === 'Compra' || mov.tipoOperacao === 'Transferência' || mov.tipoOperacao === 'Nascimento' ? mov.destino || mov.local : null;
-                let localSub = mov.tipoOperacao === 'Venda' || mov.tipoOperacao === 'Abate' || mov.tipoOperacao === 'Morte' || mov.tipoOperacao === 'Transferência' ? mov.origem || mov.local : null;
+                let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
+                let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
 
                 // Definir Sexo
-                let sexo = machos.includes(cat) ? 'Macho' : (femeas.includes(cat) ? 'Fêmea' : 'Macho'); // Default Macho se não achar
+                let sexo = machos.includes(cat) ? 'Macho' : (femeas.includes(cat) ? 'Fêmea' : 'Misto/Outros'); 
 
-                if (localAdd) {
-                    if(!fazendas[localAdd]) fazendas[localAdd] = { Macho: 0, Fêmea: 0 };
+                if (localAdd && localAdd !== 'Externo') {
+                    if(!fazendas[localAdd]) fazendas[localAdd] = { Macho: 0, Fêmea: 0, 'Misto/Outros': 0 };
                     fazendas[localAdd][sexo] += qtd;
                     saldoGeral += qtd;
                     
                     if(!categoriasEstoque[cat]) categoriasEstoque[cat] = 0;
                     categoriasEstoque[cat] += qtd;
 
-                    if(mov.tipoOperacao === 'Compra') custoEstoque += valor;
+                    if(tipo === 'Compra') custoEstoque += valor;
                 }
 
-                if (localSub) {
-                    if(!fazendas[localSub]) fazendas[localSub] = { Macho: 0, Fêmea: 0 };
+                if (localSub && localSub !== 'Externo') {
+                    if(!fazendas[localSub]) fazendas[localSub] = { Macho: 0, Fêmea: 0, 'Misto/Outros': 0 };
                     fazendas[localSub][sexo] -= qtd;
                     saldoGeral -= qtd;
 
                     if(!categoriasEstoque[cat]) categoriasEstoque[cat] = 0;
                     categoriasEstoque[cat] -= qtd;
                     
-                    // Se vendeu, subtrai o custo médio para achar o valor do estoque restante (Simplificado)
-                    if(mov.tipoOperacao === 'Venda' || mov.tipoOperacao === 'Abate') {
-                        // Ideal seria ter o custo por cabeça exato da compra, faremos uma dedução proporcional
+                    if(tipo === 'Venda' || tipo === 'Abate') {
                         if (saldoGeral > 0) {
                             let custoMedio = custoEstoque / (saldoGeral + qtd);
                             custoEstoque -= (custoMedio * qtd);
@@ -112,14 +111,18 @@
             for (let faz in fazendas) {
                 let m = fazendas[faz].Macho;
                 let f = fazendas[faz].Fêmea;
-                if (m === 0 && f === 0) continue;
+                let o = fazendas[faz]['Misto/Outros'];
+                let totalLocal = m + f + o;
+                
+                if (totalLocal <= 0) continue;
 
                 tbodyEstoque.innerHTML += `
                     <tr class="border-b">
                         <td class="p-2 font-bold text-slate-700">${faz}</td>
                         <td class="p-2 text-center text-blue-600">${m}</td>
                         <td class="p-2 text-center text-pink-600">${f}</td>
-                        <td class="p-2 text-center font-black">${m + f}</td>
+                        <td class="p-2 text-center text-slate-500">${o}</td>
+                        <td class="p-2 text-center font-black">${totalLocal}</td>
                     </tr>
                 `;
             }
@@ -176,35 +179,33 @@
 
         // 3. PROCESSAR CUSTO CABEÇA / MÊS
         function processarCustoMensal() {
-            let mesesMap = {}; // { 'YYYY-MM': { despesas: 0, cabecasAcumuladas: 0 } }
+            let mesesMap = {}; 
 
-            // Somar Despesas Operacionais (Fixos e Variáveis)
             lancamentos.forEach(lan => {
                 if (lan.tipoCusto === 'Custos Fixos' || lan.tipoCusto === 'Custos Variáveis') {
                     if (lan.data) {
-                        let mesAno = lan.data.substring(0, 7); // YYYY-MM
+                        let mesAno = lan.data.substring(0, 7); 
                         if (!mesesMap[mesAno]) mesesMap[mesAno] = { despesas: 0, cabecas: 0 };
                         mesesMap[mesAno].despesas += parseFloat(lan.valor) || 0;
                     }
                 }
             });
 
-            // Achar o saldo de cabeças em cada mês
             let saldoHistorico = 0;
-            // Assumimos que movimentacoes estão ordenadas por data
             let movimentosAgrupadosPorMes = {};
             movimentacoes.forEach(mov => {
                 if(mov.data) {
                     let mesAno = mov.data.substring(0, 7);
                     if(!movimentosAgrupadosPorMes[mesAno]) movimentosAgrupadosPorMes[mesAno] = 0;
                     
-                    let qtd = parseInt(mov.qtdCabecas) || 0;
-                    if (mov.tipoOperacao === 'Compra' || mov.tipoOperacao === 'Nascimento') movimentosAgrupadosPorMes[mesAno] += qtd;
-                    if (mov.tipoOperacao === 'Venda' || mov.tipoOperacao === 'Abate' || mov.tipoOperacao === 'Morte') movimentosAgrupadosPorMes[mesAno] -= qtd;
+                    let qtd = parseInt(mov.quantidade) || 0;
+                    let tipo = mov.tipo;
+
+                    if (tipo === 'Compra' || tipo === 'Nascimento') movimentosAgrupadosPorMes[mesAno] += qtd;
+                    if (tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte') movimentosAgrupadosPorMes[mesAno] -= qtd;
                 }
             });
 
-            // Extrair todos os meses que existem (ou nas despesas ou no gado) e ordenar
             let todosMeses = Array.from(new Set([...Object.keys(mesesMap), ...Object.keys(movimentosAgrupadosPorMes)])).sort();
             
             let tbodyMensal = document.getElementById('tbody-custo-mensal');
@@ -215,7 +216,6 @@
             let saldoCorrente = 0;
 
             todosMeses.forEach(mes => {
-                // Atualiza o saldo de cabeças até aquele mês
                 if(movimentosAgrupadosPorMes[mes]) saldoCorrente += movimentosAgrupadosPorMes[mes];
                 
                 let despesaMes = mesesMap[mes] ? mesesMap[mes].despesas : 0;
@@ -255,7 +255,7 @@
                             <span class="text-xs font-bold text-slate-700">${cat} (${qtd} cab.)</span>
                             <div class="flex items-center gap-2">
                                 <label class="text-[10px] text-slate-500 uppercase">Preço/Cab: R$</label>
-                                <input type="number" id="prev-${cat}" value="2500" oninput="calcularPrevisao()" class="w-24 p-1 border rounded text-xs text-right font-bold text-emerald-700 outline-none">
+                                <input type="number" id="prev-${cat.replace(/\s+/g, '')}" value="2500" oninput="calcularPrevisao()" class="w-24 p-1 border rounded text-xs text-right font-bold text-emerald-700 outline-none">
                             </div>
                         </div>
                     `;
@@ -269,7 +269,8 @@
             for (let cat in window.estoqueAtualCategorias) {
                 let qtd = window.estoqueAtualCategorias[cat];
                 if (qtd > 0) {
-                    let input = document.getElementById(`prev-${cat}`);
+                    let inputId = `prev-${cat.replace(/\s+/g, '')}`;
+                    let input = document.getElementById(inputId);
                     let preco = input ? parseFloat(input.value) : 0;
                     totalPrevisao += (qtd * preco);
                 }
@@ -283,7 +284,6 @@
 
     <div class="max-w-6xl mx-auto space-y-6">
         
-        <!-- CABEÇALHO -->
         <div class="bg-white rounded-2xl shadow p-4 md:p-6 border-l-8 border-slate-800 flex justify-between items-center">
             <div>
                 <h1 class="text-xl md:text-3xl font-black text-slate-800 uppercase tracking-tight">Gestão DR</h1>
@@ -292,7 +292,6 @@
             <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2 rounded text-xs uppercase no-print">Imprimir</button>
         </div>
 
-        <!-- KPIs PRINCIPAIS -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
                 <p class="text-[10px] font-bold text-slate-500 uppercase">Saldo Físico Atual</p>
@@ -317,7 +316,6 @@
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- BLOCO 1: ESTOQUE FÍSICO -->
             <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
                 <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Estoque por Fazenda e Sexo</h2>
                 <table class="w-full text-xs text-left">
@@ -326,25 +324,22 @@
                             <th class="p-2">Fazenda / Local</th>
                             <th class="p-2 text-center text-blue-800">Machos</th>
                             <th class="p-2 text-center text-pink-800">Fêmeas</th>
+                            <th class="p-2 text-center text-slate-600">Misto</th>
                             <th class="p-2 text-center font-black">Total</th>
                         </tr>
                     </thead>
                     <tbody id="tbody-estoque">
-                        <tr><td colspan="4" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
+                        <tr><td colspan="5" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
                     </tbody>
                 </table>
 
-                <!-- SIMULADOR DE VENDA -->
                 <h2 class="text-sm font-bold text-emerald-800 uppercase mt-6 mb-3 border-b pb-1 border-emerald-200 no-print">Simulador de Venda (Preços Atuais)</h2>
                 <div id="div-previsao-inputs" class="space-y-1 no-print">
                     <p class="text-xs text-slate-400">Aguardando dados do estoque...</p>
                 </div>
             </div>
 
-            <!-- BLOCO 2: FINANCEIRO E CUSTOS -->
             <div class="space-y-6">
-                
-                <!-- Custo Cabeça / Mês -->
                 <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
                     <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Evolução: Custo Cabeça / Mês</h2>
                     <table class="w-full text-xs text-left">
@@ -362,7 +357,6 @@
                     </table>
                 </div>
 
-                <!-- Detalhamento de Despesas -->
                 <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
                     <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Detalhamento de Custos (Acumulado)</h2>
                     <div id="div-despesas" class="max-h-80 overflow-y-auto pr-2">
