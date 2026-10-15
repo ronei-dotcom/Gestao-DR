@@ -27,6 +27,7 @@
 
         let lancamentos = [];
         let movimentacoes = [];
+        window.custoEstoqueAtual = 0;
         
         // Mapeamento de Sexo baseado nas categorias do Estoque DR
         const machos = ['Bezerros (M)', 'Bezerros', 'Garrotes (M)', 'Garrotes', 'Boi Magro', 'Boi Gordo', 'Touros'];
@@ -62,10 +63,10 @@
             let categoriasEstoque = {};
 
             movimentacoes.forEach(mov => {
-                const qtd = parseInt(mov.quantidade) || 0; // Ajustado para o padrão do Estoque DR
-                const valor = parseFloat(mov.valorFinanceiro) || 0; // Ajustado para o padrão do Estoque DR
+                const qtd = parseInt(mov.quantidade) || 0; 
+                const valor = parseFloat(mov.valorFinanceiro) || 0; 
                 const cat = mov.categoria || 'Outros';
-                const tipo = mov.tipo; // Ajustado
+                const tipo = mov.tipo; 
                 
                 // Tratar Origem e Destino
                 let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
@@ -128,7 +129,9 @@
             }
 
             document.getElementById('dash-cabecas').innerText = saldoGeral;
-            document.getElementById('dash-custo-estoque').innerText = `R$ ${Math.max(0, custoEstoque).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
+            
+            window.custoEstoqueAtual = Math.max(0, custoEstoque);
+            document.getElementById('dash-custo-estoque').innerText = `R$ ${window.custoEstoqueAtual.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
             
             // Gerar inputs para Previsão de Venda baseados no que existe no estoque
             window.estoqueAtualCategorias = categoriasEstoque;
@@ -191,7 +194,6 @@
                 }
             });
 
-            let saldoHistorico = 0;
             let movimentosAgrupadosPorMes = {};
             movimentacoes.forEach(mov => {
                 if(mov.data) {
@@ -240,7 +242,7 @@
             document.getElementById('dash-custo-mes').innerText = `R$ ${mediaGeral.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
         }
 
-        // 4. PREVISÃO DE VENDA
+        // 4. PREVISÃO DE VENDA E RESULTADO
         window.estoqueAtualCategorias = {};
 
         function gerarInputsPrevisao() {
@@ -275,7 +277,20 @@
                     totalPrevisao += (qtd * preco);
                 }
             }
+            
+            // Atualiza Previsão Bruta
             document.getElementById('dash-previsao').innerText = `R$ ${totalPrevisao.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+            
+            // Atualiza Resultado Projetado
+            let resultado = totalPrevisao - window.custoEstoqueAtual;
+            let dashResultado = document.getElementById('dash-resultado');
+            dashResultado.innerText = `R$ ${resultado.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+            
+            if (resultado >= 0) {
+                dashResultado.className = "text-2xl lg:text-3xl font-black text-indigo-700 mt-2";
+            } else {
+                dashResultado.className = "text-2xl lg:text-3xl font-black text-red-600 mt-2";
+            }
         }
 
     </script>
@@ -292,7 +307,8 @@
             <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2 rounded text-xs uppercase no-print">Imprimir</button>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <!-- INDICADORES LINHA 1 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
                 <p class="text-[10px] font-bold text-slate-500 uppercase">Saldo Físico Atual</p>
                 <h2 class="text-3xl font-black text-blue-700 mt-1" id="dash-cabecas">0</h2>
@@ -303,15 +319,24 @@
                 <h2 class="text-3xl font-black text-red-600 mt-1" id="dash-custo-mes">R$ 0,00</h2>
                 <p class="text-[10px] text-slate-400">Histórico Geral</p>
             </div>
-            <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
-                <p class="text-[10px] font-bold text-slate-500 uppercase">Custo Total de Aquisição</p>
-                <h2 class="text-2xl font-black text-slate-800 mt-2" id="dash-custo-estoque">R$ 0,00</h2>
-                <p class="text-[10px] text-slate-400">Investimento no gado atual</p>
+        </div>
+
+        <!-- INDICADORES LINHA 2 (RESULTADOS E PREVISÃO) -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-white p-6 rounded-xl shadow border border-slate-200 text-center">
+                <p class="text-[11px] font-bold text-slate-500 uppercase">Custo Total de Aquisição</p>
+                <h2 class="text-2xl lg:text-3xl font-black text-slate-800 mt-2" id="dash-custo-estoque">R$ 0,00</h2>
+                <p class="text-[10px] text-slate-400 mt-1">Investimento no gado atual</p>
             </div>
-            <div class="bg-white p-4 rounded-xl shadow border border-emerald-300 bg-emerald-50 text-center">
-                <p class="text-[10px] font-bold text-emerald-800 uppercase">Previsão Bruta de Venda</p>
-                <h2 class="text-2xl font-black text-emerald-600 mt-2" id="dash-previsao">R$ 0,00</h2>
-                <p class="text-[10px] text-emerald-600">Baseado no simulador abaixo</p>
+            <div class="bg-white p-6 rounded-xl shadow border border-emerald-300 bg-emerald-50 text-center">
+                <p class="text-[11px] font-bold text-emerald-800 uppercase">Previsão Bruta de Venda</p>
+                <h2 class="text-2xl lg:text-3xl font-black text-emerald-600 mt-2" id="dash-previsao">R$ 0,00</h2>
+                <p class="text-[10px] text-emerald-600 mt-1">Baseado no simulador abaixo</p>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow border border-indigo-300 bg-indigo-50 text-center">
+                <p class="text-[11px] font-bold text-indigo-800 uppercase">Resultado Projetado</p>
+                <h2 class="text-2xl lg:text-3xl font-black text-indigo-700 mt-2" id="dash-resultado">R$ 0,00</h2>
+                <p class="text-[10px] text-indigo-600 mt-1">Previsão Bruta - Custo de Aquisição</p>
             </div>
         </div>
 
