@@ -3,365 +3,375 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Estoque de Gado e Custos DR</title>
-    <!-- Tailwind CSS -->
+    <title>Gestão DR - Análise e Resultados</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Biblioteca para Ler e Gerar Excel (.xlsx) -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-    <!-- SDKs do Firebase v10 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // CHAVE DO FIREBASE (BANCO DE DADOS DA SOCIEDADE)
         const firebaseConfig = {
             apiKey: "AIzaSyDgnDHu-dHCo5oZRo113M5jQ1kxwX9_1uE",
             authDomain: "sociedade-dr.firebaseapp.com",
             projectId: "sociedade-dr",
             storageBucket: "sociedade-dr.firebasestorage.app",
             messagingSenderId: "200039389906",
-            appId: "1:200039389906:web:7e78b4389e99bfcb536b0b",
-            measurementId: "G-18PGSQ0RKF"
+            appId: "1:200039389906:web:7e78b4389e99bfcb536b0b"
         };
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+
+        // Coleções dos dois apps
+        const colFinanceiro = collection(db, "lancamentos_dr");
+        const colGado = collection(db, "movimentacoes_gado_dr");
+
+        let lancamentos = [];
+        let movimentacoes = [];
         
-        // Conexão com o Gado e com o Financeiro (Acerto DR)
-        const colGadoRef = collection(db, "gestao_geral_dr");
-        const colFinanceiroRef = collection(db, "lancamentos_dr");
+        // Mapeamento de Sexo
+        const machos = ['Bezerro', 'Garrote', 'Boi Gordo', 'Touro', 'Macho'];
+        const femeas = ['Bezerra', 'Novilha', 'Vaca', 'Matriz', 'Fêmea'];
 
-        let registrosGado = [];
-        let despesasFirebase = 0;
-        let despesasImportadas = 0;
-
-        // 1. ESCUTAR GADO EM TEMPO REAL
-        const qGado = query(colGadoRef, orderBy("data", "asc"));
-        onSnapshot(qGado, (snapshot) => {
-            registrosGado = [];
-            snapshot.forEach((documento) => {
-                registrosGado.push({ idDoc: documento.id, ...documento.data() });
-            });
-            atualizarPainelETabela();
+        // ESCUTAR DADOS EM TEMPO REAL
+        onSnapshot(query(colFinanceiro, orderBy("data", "asc")), (snap) => {
+            lancamentos = [];
+            snap.forEach(doc => lancamentos.push(doc.data()));
+            processarDados();
         });
 
-        // 2. ESCUTAR DESPESAS DO ACERTO DR AUTOMATICAMENTE (Integração Direta)
-        onSnapshot(colFinanceiroRef, (snapshot) => {
-            let totalDespesas = 0;
-            snapshot.forEach(doc => {
-                const item = doc.data();
-                // Soma tudo, menos as transferências entre o Deivid e Ronei, pois não é custo da fazenda
-                if(item.categoria !== 'Transferência entre Sócios' && item.subcategoria !== 'Transferência entre Sócios') {
-                    totalDespesas += parseFloat(item.valor) || 0;
-                }
-            });
-            despesasFirebase = totalDespesas;
-            atualizarPainelETabela();
+        onSnapshot(query(colGado, orderBy("data", "asc")), (snap) => {
+            movimentacoes = [];
+            snap.forEach(doc => movimentacoes.push(doc.data()));
+            processarDados();
         });
 
-        // 3. LER O RELATÓRIO DO EXCEL (Caso o usuário prefira enviar o arquivo)
-        document.getElementById('upload-excel').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if(!file) return;
-            
-            const reader = new FileReader();
-            reader.onload = function(evt) {
-                const data = new Uint8Array(evt.target.result);
-                const workbook = XLSX.read(data, {type: 'array'});
-                const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                const json = XLSX.utils.sheet_to_json(worksheet);
+        function processarDados() {
+            if (!lancamentos.length && !movimentacoes.length) return;
 
-                let somaExcel = 0;
-                json.forEach(row => {
-                    let valRonei = parseFloat(row["Ronei (R$)"]) || 0;
-                    let valDeivid = parseFloat(row["Deivid (R$)"]) || 0;
-                    let categoria = row["Categoria"] || "";
+            processarEstoque();
+            processarDespesas();
+            processarCustoMensal();
+            calcularPrevisao(); // Atualiza a previsão com os valores padrão
+        }
 
-                    if (categoria !== "Transferência entre Sócios") {
-                        somaExcel += (valRonei + valDeivid);
-                    }
-                });
+        // 1. PROCESSAR ESTOQUE E CUSTO INVESTIDO
+        function processarEstoque() {
+            let saldoGeral = 0;
+            let custoEstoque = 0;
+            let fazendas = {};
+            let categoriasEstoque = {};
 
-                if(somaExcel > 0) {
-                    despesasImportadas = somaExcel;
-                    alert(`✅ Relatório importado com sucesso!\nO sistema encontrou R$ ${somaExcel.toLocaleString('pt-BR', {minimumFractionDigits: 2})} em despesas no arquivo.`);
-                    atualizarPainelETabela();
-                } else {
-                    alert("⚠️ Nenhuma despesa válida encontrada no arquivo selecionado.");
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        });
-
-        // ATUALIZAR RECALCULO DE MESES
-        document.getElementById('qtd-meses').addEventListener('input', atualizarPainelETabela);
-
-        // SALVAR NOVA OPERAÇÃO DE GADO
-        document.getElementById('form-gado').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const btnSubmit = document.getElementById('btn-submit');
-            btnSubmit.disabled = true;
-            btnSubmit.innerText = "Salvando...";
-
-            const tipoOperacao = document.getElementById('tipo-operacao').value;
-            const data = document.getElementById('data').value;
-            const lote = document.getElementById('lote').value;
-            const local = document.getElementById('local').value;
-            const qtdCabecas = parseInt(document.getElementById('qtd-cabecas').value) || 0;
-            const pesoKg = parseFloat(document.getElementById('peso-kg').value) || 0;
-            const valor = parseFloat(document.getElementById('valor').value) || 0;
-            
-            try {
-                await addDoc(colGadoRef, {
-                    tipoOperacao, data, lote, local, qtdCabecas, pesoKg, valor, criadoEm: new Date().toISOString()
-                });
-                document.getElementById('form-gado').reset();
-                document.getElementById('data').value = new Date().toISOString().split('T')[0];
-                alert("Movimentação de gado salva com sucesso!");
-            } catch (err) {
-                alert("Erro ao salvar: " + err.message);
-            } finally {
-                btnSubmit.disabled = false;
-                btnSubmit.innerText = "Registrar Gado";
-            }
-        });
-
-        // APAGAR REGISTRO DE GADO
-        window.apagarItem = async function(idDoc) {
-            if(confirm("Deseja excluir esta movimentação?")) {
-                try {
-                    await deleteDoc(doc(db, "gestao_geral_dr", idDoc));
-                } catch(err) {
-                    alert("Erro ao excluir: " + err.message);
-                }
-            }
-        };
-
-        // CALCULAR INDICADORES E TABELA
-        function atualizarPainelETabela() {
-            const corpoTabela = document.getElementById('tabela-corpo');
-            corpoTabela.innerHTML = '';
-
-            let totalCabecas = 0;
-            let totalCabecasCompradas = 0;
-            let pesoTotalCompra = 0;
-            let totalCabecasVendidas = 0;
-            let pesoTotalVenda = 0;
-
-            if (registrosGado.length === 0) {
-                corpoTabela.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-slate-400">Nenhum gado registrado.</td></tr>';
-            }
-
-            registrosGado.forEach((item) => {
-                if (item.tipoOperacao === 'Compra' || item.tipoOperacao === 'Nascimento') {
-                    totalCabecas += item.qtdCabecas;
-                    if(item.tipoOperacao === 'Compra') {
-                        totalCabecasCompradas += item.qtdCabecas;
-                        pesoTotalCompra += item.pesoKg;
-                    }
-                } else if (item.tipoOperacao === 'Venda' || item.tipoOperacao === 'Abate' || item.tipoOperacao === 'Morte') {
-                    totalCabecas -= item.qtdCabecas;
-                    if(item.tipoOperacao === 'Venda' || item.tipoOperacao === 'Abate') {
-                        totalCabecasVendidas += item.qtdCabecas;
-                        pesoTotalVenda += item.pesoKg;
-                    }
-                }
-
-                // Renderizar Tabela
-                let estiloOperacao = "text-slate-700";
-                if (item.tipoOperacao === 'Compra') estiloOperacao = "text-blue-600 font-bold";
-                if (item.tipoOperacao === 'Venda' || item.tipoOperacao === 'Abate') estiloOperacao = "text-emerald-600 font-bold";
-                if (item.tipoOperacao === 'Morte') estiloOperacao = "text-red-600 font-bold";
-
-                const tr = document.createElement('tr');
-                tr.className = "border-b border-slate-200 hover:bg-slate-50";
-                tr.innerHTML = `
-                    <td class="p-2 text-center whitespace-nowrap">${formatarData(item.data)}</td>
-                    <td class="p-2 font-medium ${estiloOperacao}">${item.tipoOperacao}</td>
-                    <td class="p-2 text-slate-800">${item.lote} <br><span class="text-[10px] text-slate-500">📍 ${item.local}</span></td>
-                    <td class="p-2 text-center font-bold">${item.qtdCabecas}</td>
-                    <td class="p-2 text-center">${item.pesoKg > 0 ? item.pesoKg + ' kg' : '-'}</td>
-                    <td class="p-2 text-right font-mono">${item.valor > 0 ? 'R$ ' + item.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '-'}</td>
-                    <td class="p-2 text-center no-print">
-                        <button onclick="apagarItem('${item.idDoc}')" class="text-red-500 hover:text-red-700 text-[10px] font-bold uppercase">Excluir</button>
-                    </td>
-                `;
-                corpoTabela.appendChild(tr);
-            });
-
-            // DASHBOARD: CABEÇAS
-            document.getElementById('dash-cabecas').innerText = totalCabecas;
-            
-            // DASHBOARD: CUSTO CABEÇA MÊS
-            // Usa as despesas importadas do Excel, se houver. Se não, usa as automáticas da Nuvem (Acerto DR).
-            let baseDespesas = despesasImportadas > 0 ? despesasImportadas : despesasFirebase;
-            let meses = parseInt(document.getElementById('qtd-meses').value) || 1;
-            let custoCabecaMes = 0;
-
-            if (totalCabecas > 0) {
-                custoCabecaMes = (baseDespesas / totalCabecas) / meses;
-            }
-            
-            document.getElementById('dash-custo').innerText = `R$ ${custoCabecaMes.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            
-            let fonte = despesasImportadas > 0 ? "Planilha Importada" : "Sincronizado da Nuvem";
-            document.getElementById('info-fonte-custo').innerText = `Base: R$ ${baseDespesas.toLocaleString('pt-BR', {minimumFractionDigits:2})} (${fonte})`;
-
-            // DASHBOARD: GANHO DE PESO
-            let ganhoMedio = 0;
-            let dashPeso = document.getElementById('dash-peso');
-            if (totalCabecasCompradas > 0 && totalCabecasVendidas > 0) {
-                let mediaCompra = pesoTotalCompra / totalCabecasCompradas;
-                let mediaVenda = pesoTotalVenda / totalCabecasVendidas;
-                ganhoMedio = mediaVenda - mediaCompra;
+            movimentacoes.forEach(mov => {
+                const qtd = parseInt(mov.qtdCabecas) || 0;
+                const valor = parseFloat(mov.valorTotal) || parseFloat(mov.valor) || 0; // Depende de como foi salvo no Estoque DR
+                const cat = mov.categoria || 'Outros';
                 
-                if (ganhoMedio > 0) {
-                    dashPeso.innerText = `+ ${ganhoMedio.toFixed(1)} kg / cab`;
-                    dashPeso.className = "text-2xl font-black text-emerald-600";
-                } else {
-                    dashPeso.innerText = `${ganhoMedio.toFixed(1)} kg / cab`;
-                    dashPeso.className = "text-2xl font-black text-red-600";
+                // Tratar Origem e Destino
+                let localAdd = mov.tipoOperacao === 'Compra' || mov.tipoOperacao === 'Transferência' || mov.tipoOperacao === 'Nascimento' ? mov.destino || mov.local : null;
+                let localSub = mov.tipoOperacao === 'Venda' || mov.tipoOperacao === 'Abate' || mov.tipoOperacao === 'Morte' || mov.tipoOperacao === 'Transferência' ? mov.origem || mov.local : null;
+
+                // Definir Sexo
+                let sexo = machos.includes(cat) ? 'Macho' : (femeas.includes(cat) ? 'Fêmea' : 'Macho'); // Default Macho se não achar
+
+                if (localAdd) {
+                    if(!fazendas[localAdd]) fazendas[localAdd] = { Macho: 0, Fêmea: 0 };
+                    fazendas[localAdd][sexo] += qtd;
+                    saldoGeral += qtd;
+                    
+                    if(!categoriasEstoque[cat]) categoriasEstoque[cat] = 0;
+                    categoriasEstoque[cat] += qtd;
+
+                    if(mov.tipoOperacao === 'Compra') custoEstoque += valor;
                 }
-            } else {
-                dashPeso.innerText = "Aguardando Vendas";
-                dashPeso.className = "text-lg font-bold text-slate-500 mt-1";
+
+                if (localSub) {
+                    if(!fazendas[localSub]) fazendas[localSub] = { Macho: 0, Fêmea: 0 };
+                    fazendas[localSub][sexo] -= qtd;
+                    saldoGeral -= qtd;
+
+                    if(!categoriasEstoque[cat]) categoriasEstoque[cat] = 0;
+                    categoriasEstoque[cat] -= qtd;
+                    
+                    // Se vendeu, subtrai o custo médio para achar o valor do estoque restante (Simplificado)
+                    if(mov.tipoOperacao === 'Venda' || mov.tipoOperacao === 'Abate') {
+                        // Ideal seria ter o custo por cabeça exato da compra, faremos uma dedução proporcional
+                        if (saldoGeral > 0) {
+                            let custoMedio = custoEstoque / (saldoGeral + qtd);
+                            custoEstoque -= (custoMedio * qtd);
+                        } else {
+                            custoEstoque = 0;
+                        }
+                    }
+                }
+            });
+
+            // Atualizar Tabela de Estoque
+            let tbodyEstoque = document.getElementById('tbody-estoque');
+            tbodyEstoque.innerHTML = '';
+            
+            for (let faz in fazendas) {
+                let m = fazendas[faz].Macho;
+                let f = fazendas[faz].Fêmea;
+                if (m === 0 && f === 0) continue;
+
+                tbodyEstoque.innerHTML += `
+                    <tr class="border-b">
+                        <td class="p-2 font-bold text-slate-700">${faz}</td>
+                        <td class="p-2 text-center text-blue-600">${m}</td>
+                        <td class="p-2 text-center text-pink-600">${f}</td>
+                        <td class="p-2 text-center font-black">${m + f}</td>
+                    </tr>
+                `;
+            }
+
+            document.getElementById('dash-cabecas').innerText = saldoGeral;
+            document.getElementById('dash-custo-estoque').innerText = `R$ ${Math.max(0, custoEstoque).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
+            
+            // Gerar inputs para Previsão de Venda baseados no que existe no estoque
+            window.estoqueAtualCategorias = categoriasEstoque;
+            gerarInputsPrevisao();
+        }
+
+        // 2. PROCESSAR DESPESAS POR CLASSIFICAÇÃO
+        function processarDespesas() {
+            let arvore = {};
+            
+            lancamentos.forEach(lan => {
+                // Ignorar acertos e transferências
+                if (lan.categoria === 'Transferência entre Sócios' || lan.tipoCusto === 'Financeiro e Sócios') return;
+
+                let tipo = lan.tipoCusto || 'Sem Tipo';
+                let cat = lan.categoria || 'Sem Categoria';
+                let sub = lan.subcategoria || 'Sem Subcategoria';
+                let val = parseFloat(lan.valor) || 0;
+
+                if (!arvore[tipo]) arvore[tipo] = { total: 0, categorias: {} };
+                arvore[tipo].total += val;
+
+                if (!arvore[tipo].categorias[cat]) arvore[tipo].categorias[cat] = { total: 0, subcategorias: {} };
+                arvore[tipo].categorias[cat].total += val;
+
+                if (!arvore[tipo].categorias[cat].subcategorias[sub]) arvore[tipo].categorias[cat].subcategorias[sub] = 0;
+                arvore[tipo].categorias[cat].subcategorias[sub] += val;
+            });
+
+            let divDespesas = document.getElementById('div-despesas');
+            divDespesas.innerHTML = '';
+
+            for (let tipo in arvore) {
+                let htmlTipo = `<div class="mb-4"><h3 class="text-sm font-black text-slate-800 bg-slate-200 p-2 rounded uppercase">${tipo} - <span class="text-red-700">R$ ${arvore[tipo].total.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span></h3>`;
+                
+                for (let cat in arvore[tipo].categorias) {
+                    htmlTipo += `<div class="ml-4 mt-2"><h4 class="text-xs font-bold text-slate-700 uppercase border-b border-slate-300">${cat} (R$ ${arvore[tipo].categorias[cat].total.toLocaleString('pt-BR', {minimumFractionDigits:2})})</h4><ul class="ml-4 mt-1 text-xs text-slate-600">`;
+                    
+                    for (let sub in arvore[tipo].categorias[cat].subcategorias) {
+                        htmlTipo += `<li>- ${sub}: <b>R$ ${arvore[tipo].categorias[cat].subcategorias[sub].toLocaleString('pt-BR', {minimumFractionDigits:2})}</b></li>`;
+                    }
+                    htmlTipo += `</ul></div>`;
+                }
+                htmlTipo += `</div>`;
+                divDespesas.innerHTML += htmlTipo;
             }
         }
 
-        function formatarData(dataStr) {
-            if(!dataStr) return '';
-            const partes = dataStr.split('-');
-            return `${partes[2]}/${partes[1]}/${partes[0]}`;
+        // 3. PROCESSAR CUSTO CABEÇA / MÊS
+        function processarCustoMensal() {
+            let mesesMap = {}; // { 'YYYY-MM': { despesas: 0, cabecasAcumuladas: 0 } }
+
+            // Somar Despesas Operacionais (Fixos e Variáveis)
+            lancamentos.forEach(lan => {
+                if (lan.tipoCusto === 'Custos Fixos' || lan.tipoCusto === 'Custos Variáveis') {
+                    if (lan.data) {
+                        let mesAno = lan.data.substring(0, 7); // YYYY-MM
+                        if (!mesesMap[mesAno]) mesesMap[mesAno] = { despesas: 0, cabecas: 0 };
+                        mesesMap[mesAno].despesas += parseFloat(lan.valor) || 0;
+                    }
+                }
+            });
+
+            // Achar o saldo de cabeças em cada mês
+            let saldoHistorico = 0;
+            // Assumimos que movimentacoes estão ordenadas por data
+            let movimentosAgrupadosPorMes = {};
+            movimentacoes.forEach(mov => {
+                if(mov.data) {
+                    let mesAno = mov.data.substring(0, 7);
+                    if(!movimentosAgrupadosPorMes[mesAno]) movimentosAgrupadosPorMes[mesAno] = 0;
+                    
+                    let qtd = parseInt(mov.qtdCabecas) || 0;
+                    if (mov.tipoOperacao === 'Compra' || mov.tipoOperacao === 'Nascimento') movimentosAgrupadosPorMes[mesAno] += qtd;
+                    if (mov.tipoOperacao === 'Venda' || mov.tipoOperacao === 'Abate' || mov.tipoOperacao === 'Morte') movimentosAgrupadosPorMes[mesAno] -= qtd;
+                }
+            });
+
+            // Extrair todos os meses que existem (ou nas despesas ou no gado) e ordenar
+            let todosMeses = Array.from(new Set([...Object.keys(mesesMap), ...Object.keys(movimentosAgrupadosPorMes)])).sort();
+            
+            let tbodyMensal = document.getElementById('tbody-custo-mensal');
+            tbodyMensal.innerHTML = '';
+            
+            let custoTotalPeriodo = 0;
+            let mesesValidos = 0;
+            let saldoCorrente = 0;
+
+            todosMeses.forEach(mes => {
+                // Atualiza o saldo de cabeças até aquele mês
+                if(movimentosAgrupadosPorMes[mes]) saldoCorrente += movimentosAgrupadosPorMes[mes];
+                
+                let despesaMes = mesesMap[mes] ? mesesMap[mes].despesas : 0;
+                let custoCabeca = saldoCorrente > 0 ? (despesaMes / saldoCorrente) : 0;
+
+                if (saldoCorrente > 0 && despesaMes > 0) {
+                    custoTotalPeriodo += custoCabeca;
+                    mesesValidos++;
+                }
+
+                tbodyMensal.innerHTML += `
+                    <tr class="border-b hover:bg-slate-50">
+                        <td class="p-2 text-center font-bold">${mes.split('-')[1]}/${mes.split('-')[0]}</td>
+                        <td class="p-2 text-center">${saldoCorrente}</td>
+                        <td class="p-2 text-right text-red-600">R$ ${despesaMes.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                        <td class="p-2 text-right font-black text-slate-800">R$ ${custoCabeca.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                    </tr>
+                `;
+            });
+
+            let mediaGeral = mesesValidos > 0 ? (custoTotalPeriodo / mesesValidos) : 0;
+            document.getElementById('dash-custo-mes').innerText = `R$ ${mediaGeral.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
         }
 
-        window.onload = () => {
-            document.getElementById('data').value = new Date().toISOString().split('T')[0];
-        };
+        // 4. PREVISÃO DE VENDA
+        window.estoqueAtualCategorias = {};
+
+        function gerarInputsPrevisao() {
+            let divPrevisao = document.getElementById('div-previsao-inputs');
+            divPrevisao.innerHTML = '';
+
+            for (let cat in window.estoqueAtualCategorias) {
+                let qtd = window.estoqueAtualCategorias[cat];
+                if (qtd > 0) {
+                    divPrevisao.innerHTML += `
+                        <div class="flex items-center justify-between mb-2 p-2 border border-slate-200 rounded">
+                            <span class="text-xs font-bold text-slate-700">${cat} (${qtd} cab.)</span>
+                            <div class="flex items-center gap-2">
+                                <label class="text-[10px] text-slate-500 uppercase">Preço/Cab: R$</label>
+                                <input type="number" id="prev-${cat}" value="2500" oninput="calcularPrevisao()" class="w-24 p-1 border rounded text-xs text-right font-bold text-emerald-700 outline-none">
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            calcularPrevisao();
+        }
+
+        window.calcularPrevisao = function() {
+            let totalPrevisao = 0;
+            for (let cat in window.estoqueAtualCategorias) {
+                let qtd = window.estoqueAtualCategorias[cat];
+                if (qtd > 0) {
+                    let input = document.getElementById(`prev-${cat}`);
+                    let preco = input ? parseFloat(input.value) : 0;
+                    totalPrevisao += (qtd * preco);
+                }
+            }
+            document.getElementById('dash-previsao').innerText = `R$ ${totalPrevisao.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
+        }
+
     </script>
-    <style>
-        body { font-family: system-ui, -apple-system, sans-serif; }
-    </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-2 md:p-6">
+<body class="bg-slate-100 min-h-screen p-2 md:p-6 font-sans">
 
-    <div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden p-4 md:p-6">
+    <div class="max-w-6xl mx-auto space-y-6">
         
-        <div class="border-b-2 border-indigo-800 pb-3 mb-5">
-            <h1 class="text-xl md:text-3xl font-bold text-indigo-800 uppercase tracking-tight">Estoque de Gado & Desempenho</h1>
-            <p class="text-sm font-bold text-slate-600">Integrado com as despesas do Acerto DR</p>
+        <!-- CABEÇALHO -->
+        <div class="bg-white rounded-2xl shadow p-4 md:p-6 border-l-8 border-slate-800 flex justify-between items-center">
+            <div>
+                <h1 class="text-xl md:text-3xl font-black text-slate-800 uppercase tracking-tight">Gestão DR</h1>
+                <p class="text-xs font-bold text-slate-500 uppercase">Síntese Automática: Estoque + Financeiro</p>
+            </div>
+            <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2 rounded text-xs uppercase no-print">Imprimir</button>
         </div>
 
-        <!-- DASHBOARD (INDICADORES) -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div class="bg-slate-50 border-l-4 border-blue-600 p-4 rounded shadow-sm">
-                <p class="text-xs font-bold text-slate-500 uppercase">Estoque Físico Atual</p>
-                <h2 class="text-3xl font-black text-slate-800" id="dash-cabecas">0</h2>
-                <p class="text-[10px] text-slate-400 mt-1">Total de cabeças na fazenda</p>
+        <!-- KPIs PRINCIPAIS -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
+                <p class="text-[10px] font-bold text-slate-500 uppercase">Saldo Físico Atual</p>
+                <h2 class="text-3xl font-black text-blue-700 mt-1" id="dash-cabecas">0</h2>
+                <p class="text-[10px] text-slate-400">Cabeças no Pasto</p>
             </div>
-            
-            <div class="bg-slate-50 border-l-4 border-red-500 p-4 rounded shadow-sm">
-                <p class="text-xs font-bold text-slate-500 uppercase">Custo Cabeça / Mês</p>
-                <h2 class="text-3xl font-black text-red-600" id="dash-custo">R$ 0,00</h2>
-                <p class="text-[10px] text-slate-500 mt-1" id="info-fonte-custo">Sincronizando despesas...</p>
+            <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
+                <p class="text-[10px] font-bold text-slate-500 uppercase">Média Custo Cabeça/Mês</p>
+                <h2 class="text-3xl font-black text-red-600 mt-1" id="dash-custo-mes">R$ 0,00</h2>
+                <p class="text-[10px] text-slate-400">Histórico Geral</p>
             </div>
-
-            <div class="bg-slate-50 border-l-4 border-emerald-500 p-4 rounded shadow-sm">
-                <p class="text-xs font-bold text-slate-500 uppercase">Taxa Ganho de Peso</p>
-                <h2 class="text-2xl font-black text-emerald-600" id="dash-peso">Aguardando...</h2>
-                <p class="text-[10px] text-slate-400 mt-1">Média de Peso: Venda x Compra</p>
+            <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
+                <p class="text-[10px] font-bold text-slate-500 uppercase">Custo Total de Aquisição</p>
+                <h2 class="text-2xl font-black text-slate-800 mt-2" id="dash-custo-estoque">R$ 0,00</h2>
+                <p class="text-[10px] text-slate-400">Investimento no gado atual</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow border border-emerald-300 bg-emerald-50 text-center">
+                <p class="text-[10px] font-bold text-emerald-800 uppercase">Previsão Bruta de Venda</p>
+                <h2 class="text-2xl font-black text-emerald-600 mt-2" id="dash-previsao">R$ 0,00</h2>
+                <p class="text-[10px] text-emerald-600">Baseado no simulador abaixo</p>
             </div>
         </div>
 
-        <!-- BLOCO DE INTEGRAÇÃO (ONDE VOCÊ ENVIA O RELATÓRIO DO ACERTO DR) -->
-        <div class="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
-            <div class="w-full md:w-1/2">
-                <h2 class="text-sm font-bold text-indigo-900 uppercase">📥 Alimentar com Relatório do Acerto DR</h2>
-                <p class="text-xs text-indigo-700 mt-1">O sistema já puxa da nuvem automaticamente, mas se quiser analisar um relatório específico exportado no Excel, envie aqui:</p>
-            </div>
-            <div class="w-full md:w-1/2 flex items-center gap-3">
-                <input type="file" id="upload-excel" accept=".xlsx, .xls" class="text-xs border border-indigo-300 rounded p-2 bg-white w-2/3">
-                <div class="w-1/3">
-                    <label class="block text-[10px] font-bold text-indigo-800 uppercase">Ratear por (Meses)</label>
-                    <input type="number" id="qtd-meses" value="1" min="1" class="w-full p-2 border border-indigo-300 rounded text-sm text-center font-bold">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- BLOCO 1: ESTOQUE FÍSICO -->
+            <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
+                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Estoque por Fazenda e Sexo</h2>
+                <table class="w-full text-xs text-left">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-600 uppercase">
+                            <th class="p-2">Fazenda / Local</th>
+                            <th class="p-2 text-center text-blue-800">Machos</th>
+                            <th class="p-2 text-center text-pink-800">Fêmeas</th>
+                            <th class="p-2 text-center font-black">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-estoque">
+                        <tr><td colspan="4" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
+                    </tbody>
+                </table>
+
+                <!-- SIMULADOR DE VENDA -->
+                <h2 class="text-sm font-bold text-emerald-800 uppercase mt-6 mb-3 border-b pb-1 border-emerald-200 no-print">Simulador de Venda (Preços Atuais)</h2>
+                <div id="div-previsao-inputs" class="space-y-1 no-print">
+                    <p class="text-xs text-slate-400">Aguardando dados do estoque...</p>
                 </div>
             </div>
-        </div>
 
-        <!-- FORMULÁRIO EXCLUSIVO DE GADO -->
-        <div class="mb-6 p-4 border border-slate-200 rounded-xl">
-            <h2 class="text-sm font-bold text-slate-700 uppercase mb-3">Registrar Movimentação de Gado</h2>
-            <form id="form-gado" class="space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-600 uppercase">Operação</label>
-                        <select id="tipo-operacao" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300 font-bold bg-white">
-                            <option value="Compra">Entrada (Compra)</option>
-                            <option value="Nascimento">Entrada (Nascimento)</option>
-                            <option value="Venda">Saída (Venda)</option>
-                            <option value="Abate">Saída (Abate)</option>
-                            <option value="Transferência">Transferência de Pasto</option>
-                            <option value="Morte">Morte</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-slate-600 uppercase">Data</label>
-                        <input type="date" id="data" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300 bg-white">
-                    </div>
-                    <div class="md:col-span-2">
-                        <label class="block text-xs font-bold text-slate-600 uppercase">Identificação / Lote</label>
-                        <input type="text" id="lote" placeholder="Ex: Lote 01 Bezerros Nelore" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300">
+            <!-- BLOCO 2: FINANCEIRO E CUSTOS -->
+            <div class="space-y-6">
+                
+                <!-- Custo Cabeça / Mês -->
+                <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
+                    <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Evolução: Custo Cabeça / Mês</h2>
+                    <table class="w-full text-xs text-left">
+                        <thead>
+                            <tr class="bg-slate-800 text-white uppercase">
+                                <th class="p-2 text-center">Mês/Ano</th>
+                                <th class="p-2 text-center">Média Cab.</th>
+                                <th class="p-2 text-right">Despesas Operac.</th>
+                                <th class="p-2 text-right">Custo Cab/Mês</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody-custo-mensal">
+                            <tr><td colspan="4" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Detalhamento de Despesas -->
+                <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
+                    <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Detalhamento de Custos (Acumulado)</h2>
+                    <div id="div-despesas" class="max-h-80 overflow-y-auto pr-2">
+                        <p class="text-xs text-slate-400">Sincronizando árvore de custos...</p>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 border-t border-slate-100 pt-3">
-                    <div>
-                        <label class="block text-xs font-bold text-slate-600 uppercase">Fazenda / Pasto</label>
-                        <input type="text" id="local" placeholder="Ex: Arrendamento Dinei" required class="w-full mt-1 p-2 border rounded-md text-sm border-slate-300">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-blue-800 uppercase">Qtd de Cabeças</label>
-                        <input type="number" id="qtd-cabecas" placeholder="Ex: 40" required class="w-full mt-1 p-2 border rounded-md text-sm border-blue-300 bg-blue-50">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-orange-800 uppercase">Peso Total (KG)</label>
-                        <input type="number" step="0.1" id="peso-kg" placeholder="Opcional" class="w-full mt-1 p-2 border rounded-md text-sm border-orange-300 bg-orange-50">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-bold text-emerald-800 uppercase">Valor Compra/Venda (R$)</label>
-                        <input type="number" step="0.01" id="valor" placeholder="Opcional" class="w-full mt-1 p-2 border rounded-md text-sm border-emerald-300 bg-emerald-50">
-                    </div>
-                </div>
-
-                <div class="pt-2">
-                    <button type="submit" id="btn-submit" class="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-3 rounded-lg text-sm transition uppercase shadow">
-                        Registrar Gado
-                    </button>
-                </div>
-            </form>
+            </div>
         </div>
-
-        <!-- TABELA DE HISTÓRICO FÍSICO -->
-        <h2 class="text-sm font-bold text-slate-700 uppercase mb-2">Histórico do Rebanho</h2>
-        <div class="overflow-x-auto border border-slate-300 rounded">
-            <table class="w-full text-xs border-collapse">
-                <thead>
-                    <tr class="bg-slate-800 text-white text-center font-bold">
-                        <th class="p-2 border-b border-slate-700">DATA</th>
-                        <th class="p-2 border-b border-slate-700">OPERAÇÃO</th>
-                        <th class="p-2 border-b border-slate-700 text-left">LOTE / LOCAL</th>
-                        <th class="p-2 border-b border-slate-700">CABEÇAS</th>
-                        <th class="p-2 border-b border-slate-700">PESO (KG)</th>
-                        <th class="p-2 border-b border-slate-700 text-right">VALOR NF (R$)</th>
-                        <th class="p-2 border-b border-slate-700 no-print">AÇÃO</th>
-                    </tr>
-                </thead>
-                <tbody id="tabela-corpo">
-                    <tr><td colspan="7" class="text-center py-4 text-slate-400">Carregando gado...</td></tr>
-                </tbody>
-            </table>
-        </div>
-
     </div>
 </body>
 </html>
