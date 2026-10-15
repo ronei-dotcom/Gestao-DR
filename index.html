@@ -60,7 +60,6 @@
                 if(data.categoria) categorias.add(data.categoria);
             });
             
-            // Popula selects de filtro
             const selTipo = document.getElementById('filtro-tipo');
             if(selTipo && selTipo.options.length <= 1) {
                 tipos.forEach(t => selTipo.innerHTML += `<option value="${t}">${t}</option>`);
@@ -140,7 +139,6 @@
 
                 let classif = item.tipoCusto && item.subcategoria ? `[${item.tipoCusto}] ${item.categoria} > ${item.subcategoria}` : `[Antigo] ${item.categoria || 'Outros'}`;
                 
-                // Usar unshift para colocar o mais novo no topo
                 htmlRows.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs ${item.pendente ? 'bg-amber-50/60' : ''}">
                         <td class="p-2 text-center text-slate-500 font-mono">[${index+1}]</td>
@@ -176,16 +174,21 @@
             let saldoGeral = 0;
             window.fazendasEstoque = {};
 
-            // Construir Estoque Atual
+            let estoque_cabecas = 0;
+            let valor_estoque = 0;
+
+            // Construir Estoque Atual e Cálculo do Custo Médio Contínuo
             window.movimentacoes.forEach(mov => {
                 const qtd = parseInt(mov.quantidade) || 0; 
                 const cat = mov.categoria || 'Outros';
                 const tipo = mov.tipo; 
+                const valorFin = parseFloat(mov.valorFinanceiro) || 0;
                 
                 let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
                 let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
                 let sexo = machos.includes(cat) ? 'Macho' : 'Fêmea'; 
 
+                // Locais (Ativos)
                 if (localAdd && localAdd !== 'Externo') {
                     if(!window.fazendasEstoque[localAdd]) window.fazendasEstoque[localAdd] = { Macho: 0, Fêmea: 0, Total: 0 };
                     window.fazendasEstoque[localAdd][sexo] += qtd;
@@ -199,7 +202,36 @@
                     window.fazendasEstoque[localSub].Total -= qtd;
                     saldoGeral -= qtd;
                 }
+
+                // Cálculo Financeiro e Formatação
+                if (tipo === 'Compra') {
+                    estoque_cabecas += qtd;
+                    valor_estoque += valorFin;
+                    mov._valorExibicao = `R$ ${valorFin.toLocaleString('pt-BR',{minimumFractionDigits:2})}`;
+                } else if (tipo === 'Nascimento') {
+                    estoque_cabecas += qtd;
+                    mov._valorExibicao = `-`;
+                } else if (['Venda', 'Abate', 'Morte'].includes(tipo)) {
+                    let custo_medio = estoque_cabecas > 0 ? valor_estoque / estoque_cabecas : 0;
+                    let valor_deduzido = custo_medio * qtd;
+
+                    valor_estoque -= valor_deduzido;
+                    estoque_cabecas -= qtd;
+
+                    if (valor_estoque < 0) valor_estoque = 0;
+                    if (estoque_cabecas < 0) estoque_cabecas = 0;
+
+                    if (tipo === 'Morte') {
+                        mov._valorExibicao = `<span class="text-red-600 font-bold">- R$ ${valor_deduzido.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span><br><span class="text-[9px] text-slate-500 font-sans">Custo Médio: R$ ${custo_medio.toLocaleString('pt-BR',{minimumFractionDigits:2})}/cab</span>`;
+                    } else { // Venda ou Abate
+                        mov._valorExibicao = `R$ ${valorFin.toLocaleString('pt-BR',{minimumFractionDigits:2})}<br><span class="text-[9px] text-slate-500 font-sans">Baixa do Estoque: -R$ ${valor_deduzido.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span>`;
+                    }
+                } else {
+                    mov._valorExibicao = `-`; // Transferência
+                }
             });
+
+            window.custoEstoqueAtual = Math.max(0, valor_estoque);
 
             // Tabela de Ativos
             let tbodyAtivos = document.getElementById('estoque-tbody-ativos');
@@ -226,14 +258,13 @@
                 if(item.tipo === 'Venda') corOp = "text-emerald-700 font-bold";
                 if(item.tipo === 'Morte') corOp = "text-red-600 font-bold";
 
-                // Usar unshift para colocar o mais novo no topo
                 histHtml.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs">
                         <td class="p-2 text-center">${item.data ? item.data.split('-').reverse().join('/') : ''}</td>
                         <td class="p-2 ${corOp}">${item.tipo}</td>
                         <td class="p-2">${item.categoria}</td>
                         <td class="p-2 text-center font-bold">${item.quantidade}</td>
-                        <td class="p-2 text-right font-mono">${item.valorFinanceiro ? 'R$ ' + parseFloat(item.valorFinanceiro).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
+                        <td class="p-2 text-right font-mono">${item._valorExibicao}</td>
                     </tr>
                 `);
             });
@@ -249,31 +280,7 @@
         // ABA: PROJEÇÃO DE VENDAS
         // -----------------------------------------
         function atualizarProjecao() {
-            let saldoGeral = 0;
-            let custoEstoque = 0;
-
-            window.movimentacoes.forEach(mov => {
-                const qtd = parseInt(mov.quantidade) || 0; 
-                const valor = parseFloat(mov.valorFinanceiro) || 0; 
-                const tipo = mov.tipo; 
-                
-                let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
-                let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
-
-                if (localAdd && localAdd !== 'Externo') {
-                    saldoGeral += qtd;
-                    if(tipo === 'Compra') custoEstoque += valor;
-                }
-                if (localSub && localSub !== 'Externo') {
-                    saldoGeral -= qtd;
-                    if(tipo === 'Venda' || tipo === 'Abate') {
-                        if (saldoGeral > 0) custoEstoque -= ((custoEstoque / (saldoGeral + qtd)) * qtd);
-                        else custoEstoque = 0;
-                    }
-                }
-            });
-
-            window.custoEstoqueAtual = Math.max(0, custoEstoque);
+            // O custoEstoqueAtual já foi calculado na atualizarEstoque()
             document.getElementById('proj-custo-estoque').innerText = `R$ ${window.custoEstoqueAtual.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
 
             let divPrevisao = document.getElementById('div-projecao-inputs');
@@ -357,10 +364,9 @@
                 let despesaMes = mesesMap[mes] ? mesesMap[mes].despesas : 0;
                 let custoCabeca = saldoCorrente > 0 ? (despesaMes / saldoCorrente) : 0;
 
-                // Bloqueia exibição de meses sem despesas
+                // Bloqueia exibição de meses sem despesas (Limpeza do primeiro mês)
                 if (despesaMes === 0) return;
 
-                // Formatar para exibição: Inverte para manter do mais novo no topo
                 htmlRows.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50">
                         <td class="p-3 text-center font-bold text-slate-700">${mes.split('-')[1]}/${mes.split('-')[0]}</td>
@@ -481,11 +487,11 @@
                 <table class="w-full text-xs text-left">
                     <thead>
                         <tr class="bg-[#1f3b8b] text-white uppercase text-center font-bold">
-                            <th class="p-2">Data</th>
-                            <th class="p-2">Operação</th>
-                            <th class="p-2">Categoria</th>
-                            <th class="p-2">Cabeças</th>
-                            <th class="p-2 text-right">Valor Financeiro</th>
+                            <th class="p-2 w-[15%]">Data</th>
+                            <th class="p-2 w-[15%]">Operação</th>
+                            <th class="p-2 w-[25%]">Categoria</th>
+                            <th class="p-2 w-[15%]">Cabeças</th>
+                            <th class="p-2 text-right w-[30%]">Valor Financeiro / Deduzido</th>
                         </tr>
                     </thead>
                     <tbody id="estoque-tbody-hist"></tbody>
