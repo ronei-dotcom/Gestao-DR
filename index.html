@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestão DR - Análise e Resultados</title>
+    <title>Gestão DR - Painel Gerencial</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -21,7 +21,6 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // Coleções dos dois apps
         const colFinanceiro = collection(db, "lancamentos_dr");
         const colGado = collection(db, "movimentacoes_gado_dr");
 
@@ -29,11 +28,9 @@
         let movimentacoes = [];
         window.custoEstoqueAtual = 0;
         
-        // Mapeamento de Sexo baseado nas categorias do Estoque DR
         const machos = ['Bezerros (M)', 'Bezerros', 'Garrotes (M)', 'Garrotes', 'Boi Magro', 'Boi Gordo', 'Touros'];
         const femeas = ['Bezerras (F)', 'Bezerras', 'Novilhas (F)', 'Novilhas', 'Vacas'];
 
-        // ESCUTAR DADOS EM TEMPO REAL
         onSnapshot(query(colFinanceiro, orderBy("data", "asc")), (snap) => {
             lancamentos = [];
             snap.forEach(doc => lancamentos.push(doc.data()));
@@ -55,7 +52,6 @@
             calcularPrevisao(); 
         }
 
-        // 1. PROCESSAR ESTOQUE E CUSTO INVESTIDO
         function processarEstoque() {
             let saldoGeral = 0;
             let custoEstoque = 0;
@@ -68,11 +64,9 @@
                 const cat = mov.categoria || 'Outros';
                 const tipo = mov.tipo; 
                 
-                // Tratar Origem e Destino
                 let localAdd = tipo === 'Compra' || tipo === 'Transferência' || tipo === 'Nascimento' ? mov.destino : null;
                 let localSub = tipo === 'Venda' || tipo === 'Abate' || tipo === 'Morte' || tipo === 'Transferência' ? mov.origem : null;
 
-                // Definir Sexo
                 let sexo = machos.includes(cat) ? 'Macho' : 'Fêmea'; 
 
                 if (localAdd && localAdd !== 'Externo') {
@@ -105,7 +99,6 @@
                 }
             });
 
-            // Atualizar Tabela de Estoque
             let tbodyEstoque = document.getElementById('tbody-estoque');
             tbodyEstoque.innerHTML = '';
             
@@ -117,11 +110,11 @@
                 if (totalLocal <= 0) continue;
 
                 tbodyEstoque.innerHTML += `
-                    <tr class="border-b">
-                        <td class="p-2 font-bold text-slate-700">${faz}</td>
-                        <td class="p-2 text-center text-blue-600">${m}</td>
-                        <td class="p-2 text-center text-pink-600">${f}</td>
-                        <td class="p-2 text-center font-black">${totalLocal}</td>
+                    <tr class="border-b border-slate-200">
+                        <td class="p-2.5 font-bold text-slate-700">${faz}</td>
+                        <td class="p-2.5 text-center text-blue-700">${m}</td>
+                        <td class="p-2.5 text-center text-pink-700">${f}</td>
+                        <td class="p-2.5 text-center font-black">${totalLocal}</td>
                     </tr>
                 `;
             }
@@ -131,17 +124,14 @@
             window.custoEstoqueAtual = Math.max(0, custoEstoque);
             document.getElementById('dash-custo-estoque').innerText = `R$ ${window.custoEstoqueAtual.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`;
             
-            // Gerar inputs para Previsão de Venda baseados no que existe no estoque
             window.estoqueAtualCategorias = categoriasEstoque;
             gerarInputsPrevisao();
         }
 
-        // 2. PROCESSAR DESPESAS POR CLASSIFICAÇÃO
         function processarDespesas() {
             let arvore = {};
             
             lancamentos.forEach(lan => {
-                // Ignorar acertos, transferências e o Custo de Aquisição de Bovinos (conforme solicitado)
                 if (lan.categoria === 'Transferência entre Sócios' || lan.tipoCusto === 'Financeiro e Sócios') return;
                 
                 let cat = lan.categoria || 'Sem Categoria';
@@ -166,13 +156,13 @@
             divDespesas.innerHTML = '';
 
             for (let tipo in arvore) {
-                let htmlTipo = `<div class="mb-4"><h3 class="text-sm font-black text-slate-800 bg-slate-200 p-2 rounded uppercase">${tipo} - <span class="text-red-700">R$ ${arvore[tipo].total.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span></h3>`;
+                let htmlTipo = `<div class="mb-5"><h3 class="text-sm font-black text-slate-800 bg-slate-200 p-2.5 rounded uppercase tracking-wide">${tipo} <span class="float-right text-red-700">R$ ${arvore[tipo].total.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span></h3>`;
                 
                 for (let cat in arvore[tipo].categorias) {
-                    htmlTipo += `<div class="ml-4 mt-2"><h4 class="text-xs font-bold text-slate-700 uppercase border-b border-slate-300">${cat} (R$ ${arvore[tipo].categorias[cat].total.toLocaleString('pt-BR', {minimumFractionDigits:2})})</h4><ul class="ml-4 mt-1 text-xs text-slate-600">`;
+                    htmlTipo += `<div class="ml-4 mt-3"><h4 class="text-xs font-bold text-slate-700 uppercase border-b border-slate-300 pb-1">${cat} <span class="float-right text-slate-800">R$ ${arvore[tipo].categorias[cat].total.toLocaleString('pt-BR', {minimumFractionDigits:2})}</span></h4><ul class="mt-2 space-y-1 text-xs text-slate-600">`;
                     
                     for (let sub in arvore[tipo].categorias[cat].subcategorias) {
-                        htmlTipo += `<li>- ${sub}: <b>R$ ${arvore[tipo].categorias[cat].subcategorias[sub].toLocaleString('pt-BR', {minimumFractionDigits:2})}</b></li>`;
+                        htmlTipo += `<li class="flex justify-between border-b border-slate-100 pb-1"><span>- ${sub}</span> <span class="font-bold">R$ ${arvore[tipo].categorias[cat].subcategorias[sub].toLocaleString('pt-BR', {minimumFractionDigits:2})}</span></li>`;
                     }
                     htmlTipo += `</ul></div>`;
                 }
@@ -181,13 +171,11 @@
             }
         }
 
-        // 3. PROCESSAR CUSTO CABEÇA / MÊS
         function processarCustoMensal() {
             let mesesMap = {}; 
 
             lancamentos.forEach(lan => {
                 if (lan.tipoCusto === 'Custos Fixos' || lan.tipoCusto === 'Custos Variáveis') {
-                    // Ignora Aquisição de Bovinos no custo cabeça mês
                     if (lan.categoria && lan.categoria.includes('Aquisição Bovinos')) return;
                     if (lan.subcategoria && lan.subcategoria.includes('Aquisição Bovinos')) return;
 
@@ -234,11 +222,11 @@
                 }
 
                 tbodyMensal.innerHTML += `
-                    <tr class="border-b hover:bg-slate-50">
-                        <td class="p-2 text-center font-bold">${mes.split('-')[1]}/${mes.split('-')[0]}</td>
-                        <td class="p-2 text-center">${saldoCorrente}</td>
-                        <td class="p-2 text-right text-red-600">R$ ${despesaMes.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-                        <td class="p-2 text-right font-black text-slate-800">R$ ${custoCabeca.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                    <tr class="border-b border-slate-200 hover:bg-slate-50">
+                        <td class="p-2.5 text-center font-bold text-slate-700">${mes.split('-')[1]}/${mes.split('-')[0]}</td>
+                        <td class="p-2.5 text-center text-slate-700">${saldoCorrente}</td>
+                        <td class="p-2.5 text-right text-red-600 font-medium">R$ ${despesaMes.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                        <td class="p-2.5 text-right font-black text-slate-800">R$ ${custoCabeca.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
                     </tr>
                 `;
             });
@@ -247,7 +235,6 @@
             document.getElementById('dash-custo-mes').innerText = `R$ ${mediaGeral.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
         }
 
-        // 4. PREVISÃO DE VENDA E RESULTADO
         window.estoqueAtualCategorias = {};
 
         function gerarInputsPrevisao() {
@@ -258,11 +245,11 @@
                 let qtd = window.estoqueAtualCategorias[cat];
                 if (qtd > 0) {
                     divPrevisao.innerHTML += `
-                        <div class="flex items-center justify-between mb-2 p-2 border border-slate-200 rounded">
-                            <span class="text-xs font-bold text-slate-700">${cat} (${qtd} cab.)</span>
+                        <div class="flex items-center justify-between mb-2 p-2.5 border border-slate-200 rounded bg-slate-50">
+                            <span class="text-xs font-bold text-slate-700">${cat} <span class="font-normal text-slate-500">(${qtd} cabeças)</span></span>
                             <div class="flex items-center gap-2">
-                                <label class="text-[10px] text-slate-500 uppercase">Preço/Cab: R$</label>
-                                <input type="number" id="prev-${cat.replace(/\s+/g, '')}" value="2500" oninput="calcularPrevisao()" class="w-24 p-1 border rounded text-xs text-right font-bold text-emerald-700 outline-none">
+                                <label class="text-[10px] text-slate-500 uppercase font-bold">Valor (R$)</label>
+                                <input type="number" id="prev-${cat.replace(/\s+/g, '')}" value="2500" oninput="calcularPrevisao()" class="w-24 p-1.5 border border-slate-300 rounded text-xs text-right font-bold text-slate-800 outline-none focus:border-slate-500">
                             </div>
                         </div>
                     `;
@@ -283,18 +270,16 @@
                 }
             }
             
-            // Atualiza Previsão Bruta
             document.getElementById('dash-previsao').innerText = `R$ ${totalPrevisao.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
             
-            // Atualiza Resultado Projetado
             let resultado = totalPrevisao - window.custoEstoqueAtual;
             let dashResultado = document.getElementById('dash-resultado');
             dashResultado.innerText = `R$ ${resultado.toLocaleString('pt-BR', {minimumFractionDigits:2})}`;
             
             if (resultado >= 0) {
-                dashResultado.className = "text-2xl lg:text-3xl font-black text-indigo-700 mt-2";
+                dashResultado.className = "text-2xl lg:text-3xl font-black text-indigo-700 mt-1";
             } else {
-                dashResultado.className = "text-2xl lg:text-3xl font-black text-red-600 mt-2";
+                dashResultado.className = "text-2xl lg:text-3xl font-black text-red-600 mt-1";
             }
         }
 
@@ -304,92 +289,90 @@
 
     <div class="max-w-6xl mx-auto space-y-6">
         
-        <div class="bg-white rounded-2xl shadow p-4 md:p-6 border-l-8 border-slate-800 flex justify-between items-center">
+        <div class="bg-white rounded-xl shadow-sm p-5 md:p-6 border-l-8 border-slate-800 flex justify-between items-center">
             <div>
                 <h1 class="text-xl md:text-3xl font-black text-slate-800 uppercase tracking-tight">Gestão DR</h1>
-                <p class="text-xs font-bold text-slate-500 uppercase">Síntese Automática: Estoque + Financeiro</p>
+                <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mt-1">Painel Gerencial Consolidado</p>
             </div>
-            <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2 rounded text-xs uppercase no-print">Imprimir</button>
+            <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2 rounded text-xs uppercase transition-colors no-print">Imprimir Relatório</button>
         </div>
 
-        <!-- INDICADORES LINHA 1 -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
-                <p class="text-[10px] font-bold text-slate-500 uppercase">Saldo Físico Atual</p>
-                <h2 class="text-3xl font-black text-blue-700 mt-1" id="dash-cabecas">0</h2>
-                <p class="text-[10px] text-slate-400">Cabeças no Pasto</p>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 text-center">
+                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Saldo Físico Atual</p>
+                <h2 class="text-3xl font-black text-slate-800 mt-1" id="dash-cabecas">0</h2>
+                <p class="text-[10px] text-slate-400 mt-1 uppercase">Total no rebanho</p>
             </div>
-            <div class="bg-white p-4 rounded-xl shadow border border-slate-200 text-center">
-                <p class="text-[10px] font-bold text-slate-500 uppercase">Média Custo Cabeça/Mês</p>
-                <h2 class="text-3xl font-black text-red-600 mt-1" id="dash-custo-mes">R$ 0,00</h2>
-                <p class="text-[10px] text-slate-400">Histórico Geral</p>
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 text-center">
+                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Média Custo Cabeça/Mês</p>
+                <h2 class="text-3xl font-black text-red-700 mt-1" id="dash-custo-mes">R$ 0,00</h2>
+                <p class="text-[10px] text-slate-400 mt-1 uppercase">Média histórica geral</p>
             </div>
         </div>
 
-        <!-- INDICADORES LINHA 2 (RESULTADOS E PREVISÃO) -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="bg-white p-6 rounded-xl shadow border border-slate-200 text-center">
-                <p class="text-[11px] font-bold text-slate-500 uppercase">Custo Total de Aquisição</p>
-                <h2 class="text-2xl lg:text-3xl font-black text-slate-800 mt-2" id="dash-custo-estoque">R$ 0,00</h2>
-                <p class="text-[10px] text-slate-400 mt-1">Investimento no gado atual</p>
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-center">
+                <p class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Custo Total de Aquisição</p>
+                <h2 class="text-2xl lg:text-3xl font-black text-slate-800 mt-1" id="dash-custo-estoque">R$ 0,00</h2>
+                <p class="text-[10px] text-slate-400 mt-1 uppercase">Investimento no rebanho atual</p>
             </div>
-            <div class="bg-white p-6 rounded-xl shadow border border-emerald-300 bg-emerald-50 text-center">
-                <p class="text-[11px] font-bold text-emerald-800 uppercase">Previsão Bruta de Venda</p>
-                <h2 class="text-2xl lg:text-3xl font-black text-emerald-600 mt-2" id="dash-previsao">R$ 0,00</h2>
-                <p class="text-[10px] text-emerald-600 mt-1">Baseado no simulador abaixo</p>
+            <div class="bg-emerald-50 p-6 rounded-xl shadow-sm border border-emerald-200 text-center">
+                <p class="text-[11px] font-bold text-emerald-800 uppercase tracking-widest">Previsão Bruta de Faturamento</p>
+                <h2 class="text-2xl lg:text-3xl font-black text-emerald-700 mt-1" id="dash-previsao">R$ 0,00</h2>
+                <p class="text-[10px] text-emerald-600 mt-1 uppercase">Conforme projeção atual</p>
             </div>
-            <div class="bg-white p-6 rounded-xl shadow border border-indigo-300 bg-indigo-50 text-center">
-                <p class="text-[11px] font-bold text-indigo-800 uppercase">Resultado Projetado</p>
-                <h2 class="text-2xl lg:text-3xl font-black text-indigo-700 mt-2" id="dash-resultado">R$ 0,00</h2>
-                <p class="text-[10px] text-indigo-600 mt-1">Previsão Bruta - Custo de Aquisição</p>
+            <div class="bg-indigo-50 p-6 rounded-xl shadow-sm border border-indigo-200 text-center">
+                <p class="text-[11px] font-bold text-indigo-800 uppercase tracking-widest">Resultado Projetado</p>
+                <h2 class="text-2xl lg:text-3xl font-black text-indigo-700 mt-1" id="dash-resultado">R$ 0,00</h2>
+                <p class="text-[10px] text-indigo-600 mt-1 uppercase">Lucro bruto estimado</p>
             </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
-                <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Estoque</h2>
-                <table class="w-full text-xs text-left">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-300 pb-2">Estoque do Rebanho</h2>
+                <table class="w-full text-xs text-left mb-6">
                     <thead>
-                        <tr class="bg-slate-100 text-slate-600 uppercase">
-                            <th class="p-2">Fazenda / Local</th>
-                            <th class="p-2 text-center text-blue-800">Machos</th>
-                            <th class="p-2 text-center text-pink-800">Fêmeas</th>
-                            <th class="p-2 text-center font-black">Total</th>
+                        <tr class="bg-slate-100 text-slate-600 uppercase tracking-wider border-b border-slate-300">
+                            <th class="p-2.5 font-bold">Local</th>
+                            <th class="p-2.5 text-center font-bold">Machos</th>
+                            <th class="p-2.5 text-center font-bold">Fêmeas</th>
+                            <th class="p-2.5 text-center font-black">Total</th>
                         </tr>
                     </thead>
                     <tbody id="tbody-estoque">
-                        <tr><td colspan="4" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
+                        <tr><td colspan="4" class="text-center p-4 text-slate-400">Carregando informações...</td></tr>
                     </tbody>
                 </table>
 
-                <h2 class="text-sm font-bold text-emerald-800 uppercase mt-6 mb-3 border-b pb-1 border-emerald-200 no-print">Simulador de Venda</h2>
-                <div id="div-previsao-inputs" class="space-y-1 no-print">
-                    <p class="text-xs text-slate-400">Aguardando dados do estoque...</p>
+                <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mt-2 mb-4 border-b border-slate-300 pb-2 no-print">Projeção de Vendas</h2>
+                <div id="div-previsao-inputs" class="space-y-2 no-print">
+                    <p class="text-xs text-slate-400">Carregando informações do estoque...</p>
                 </div>
             </div>
 
             <div class="space-y-6">
-                <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
-                    <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Evolução: Custo Cabeça / Mês</h2>
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-300 pb-2">Histórico: Custo Cabeça / Mês</h2>
                     <table class="w-full text-xs text-left">
                         <thead>
-                            <tr class="bg-slate-800 text-white uppercase">
-                                <th class="p-2 text-center">Mês/Ano</th>
-                                <th class="p-2 text-center">Média Cab.</th>
-                                <th class="p-2 text-right">Despesas Operac.</th>
-                                <th class="p-2 text-right">Custo Cab/Mês</th>
+                            <tr class="bg-slate-800 text-white uppercase tracking-wider">
+                                <th class="p-2.5 text-center font-bold">Período</th>
+                                <th class="p-2.5 text-center font-bold">Volume (Cab.)</th>
+                                <th class="p-2.5 text-right font-bold">Despesas Operacionais</th>
+                                <th class="p-2.5 text-right font-bold">Custo Unitário</th>
                             </tr>
                         </thead>
                         <tbody id="tbody-custo-mensal">
-                            <tr><td colspan="4" class="text-center p-4 text-slate-400">Sincronizando...</td></tr>
+                            <tr><td colspan="4" class="text-center p-4 text-slate-400">Carregando informações...</td></tr>
                         </tbody>
                     </table>
                 </div>
 
-                <div class="bg-white p-5 rounded-xl shadow border border-slate-200">
-                    <h2 class="text-sm font-bold text-slate-800 uppercase mb-4 border-b pb-2 border-slate-800">Detalhamento de Custos (Acumulado)</h2>
-                    <div id="div-despesas" class="max-h-80 overflow-y-auto pr-2">
-                        <p class="text-xs text-slate-400">Sincronizando árvore de custos...</p>
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h2 class="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b border-slate-300 pb-2">Demonstrativo de Custos (Acumulado)</h2>
+                    <div id="div-despesas" class="max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                        <p class="text-xs text-slate-400">Carregando demonstrativo financeiro...</p>
                     </div>
                 </div>
 
