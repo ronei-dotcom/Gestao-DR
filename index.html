@@ -121,6 +121,8 @@
                 return;
             }
 
+            let htmlRows = [];
+
             filtrados.forEach((item, index) => {
                 let aporteRonei = 0, aporteDeivid = 0;
                 const isTransf = item.categoria === 'Transferência entre Sócios' || item.subcategoria === 'Transferência entre Sócios';
@@ -138,7 +140,8 @@
 
                 let classif = item.tipoCusto && item.subcategoria ? `[${item.tipoCusto}] ${item.categoria} > ${item.subcategoria}` : `[Antigo] ${item.categoria || 'Outros'}`;
                 
-                corpoTabela.innerHTML += `
+                // Usar unshift para colocar o mais novo no topo
+                htmlRows.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs ${item.pendente ? 'bg-amber-50/60' : ''}">
                         <td class="p-2 text-center text-slate-500 font-mono">[${index+1}]</td>
                         <td class="p-2 text-center">${item.data.split('-').reverse().join('/')}</td>
@@ -150,8 +153,10 @@
                         <td class="p-2 text-right font-mono">${aporteDeivid ? 'R$ '+aporteDeivid.toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
                         <td class="p-2 text-right font-bold text-slate-700 font-mono">R$ ${Math.abs(saldoAcumulado).toLocaleString('pt-BR',{minimumFractionDigits:2})}</td>
                     </tr>
-                `;
+                `);
             });
+
+            corpoTabela.innerHTML = htmlRows.join('');
         };
 
         window.limparFiltros = function() {
@@ -213,24 +218,31 @@
 
             // Tabela de Histórico
             let tbodyHist = document.getElementById('estoque-tbody-hist');
-            tbodyHist.innerHTML = '';
+            let histHtml = [];
+            
             window.movimentacoes.forEach((item) => {
                 let corOp = "text-slate-700";
                 if(item.tipo === 'Compra') corOp = "text-blue-700 font-bold";
                 if(item.tipo === 'Venda') corOp = "text-emerald-700 font-bold";
                 if(item.tipo === 'Morte') corOp = "text-red-600 font-bold";
 
-                tbodyHist.innerHTML += `
+                // Usar unshift para colocar o mais novo no topo
+                histHtml.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50 text-xs">
                         <td class="p-2 text-center">${item.data ? item.data.split('-').reverse().join('/') : ''}</td>
                         <td class="p-2 ${corOp}">${item.tipo}</td>
                         <td class="p-2">${item.categoria}</td>
                         <td class="p-2 text-center font-bold">${item.quantidade}</td>
-                        <td class="p-2 font-medium">${item.origem || 'Externo'} ➔ ${item.destino || 'Externo'}</td>
                         <td class="p-2 text-right font-mono">${item.valorFinanceiro ? 'R$ ' + parseFloat(item.valorFinanceiro).toLocaleString('pt-BR',{minimumFractionDigits:2}) : '-'}</td>
                     </tr>
-                `;
+                `);
             });
+
+            if (histHtml.length === 0) {
+                tbodyHist.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-slate-400">Nenhuma movimentação.</td></tr>';
+            } else {
+                tbodyHist.innerHTML = histHtml.join('');
+            }
         }
 
         // -----------------------------------------
@@ -338,20 +350,32 @@
             tbodyMensal.innerHTML = '';
             
             let saldoCorrente = 0;
+            let htmlRows = [];
+
             todosMeses.forEach(mes => {
                 if(movimentosAgrupadosPorMes[mes]) saldoCorrente += movimentosAgrupadosPorMes[mes];
                 let despesaMes = mesesMap[mes] ? mesesMap[mes].despesas : 0;
                 let custoCabeca = saldoCorrente > 0 ? (despesaMes / saldoCorrente) : 0;
 
-                tbodyMensal.innerHTML += `
+                // Bloqueia exibição de meses sem despesas
+                if (despesaMes === 0) return;
+
+                // Formatar para exibição: Inverte para manter do mais novo no topo
+                htmlRows.unshift(`
                     <tr class="border-b border-slate-200 hover:bg-slate-50">
                         <td class="p-3 text-center font-bold text-slate-700">${mes.split('-')[1]}/${mes.split('-')[0]}</td>
                         <td class="p-3 text-center text-slate-700">${saldoCorrente}</td>
                         <td class="p-3 text-right text-red-600 font-medium">R$ ${despesaMes.toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
                         <td class="p-3 text-right font-black text-slate-800">R$ ${custoCabeca.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
                     </tr>
-                `;
+                `);
             });
+
+            if (htmlRows.length === 0) {
+                tbodyMensal.innerHTML = '<tr><td colspan="4" class="text-center p-4 text-slate-400">Nenhuma despesa para rateio encontrada.</td></tr>';
+            } else {
+                tbodyMensal.innerHTML = htmlRows.join('');
+            }
         }
 
         window.onload = () => { abrirAba('tab-acerto'); };
@@ -461,7 +485,6 @@
                             <th class="p-2">Operação</th>
                             <th class="p-2">Categoria</th>
                             <th class="p-2">Cabeças</th>
-                            <th class="p-2 text-left">Logística (Origem ➔ Destino)</th>
                             <th class="p-2 text-right">Valor Financeiro</th>
                         </tr>
                     </thead>
